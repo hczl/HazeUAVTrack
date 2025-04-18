@@ -1,0 +1,31 @@
+# configs/exp1.yaml
+
+experiment_name: "exp1_dcp_yolov5_sort"
+
+# 生成雾方法，可选: None,MiDaS_Deep
+haze_method: "MiDaS_Deep"
+
+# 去雾方法，可选: None
+dehaze_method: "None"
+
+# 检测器，可选: YOLOv5 (默认加载 yolov5s.pt)
+detector: "YOLOv5"
+
+# 跟踪算法，可选: SORT
+tracker: "SORT"
+
+# 检测与跟踪参数
+confidence_threshold: 0.4
+iou_threshold: 0.5
+
+# 数据集路径与设置
+dataset:
+  path: "./data/UAV-M"
+  data_path: "UAV-benchmark-M"
+  label_path: "UAV-benchmark-MOTD_v1.0/GT"
+
+# 是否保存可视化结果
+save_output: true
+
+# 随机种子
+seed: 2025
