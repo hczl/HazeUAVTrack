@@ -12,7 +12,8 @@ def haze(input_path):
     base_output = Path(f"MiDaS_Deep_{dataset_name}")
     depth_path = base_output / 'depth_temp'
     hazy_path = base_output
-
+    if os.path.exists(input_path.parent / f"MiDaS_Deep_{dataset_name}"):
+        return str(hazy_path.resolve())
     # 清空旧深度图
     if depth_path.exists():
         shutil.rmtree(depth_path)
