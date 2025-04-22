@@ -8,7 +8,7 @@ data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0201_gt_whole.txt', h
                           'out_of_view', 'occlusion', 'object_category'])
 
 # 图像文件夹路径
-image_folder = 'data/MiDaS_Deep_UAV-M/M0201'
+image_folder = 'data/MiDaS_Deep_UAV-benchmark-M/M0201'
 
 # 获取所有图像文件名并排序，确保按照文件名中的数字部分排序
 image_files = sorted(os.listdir(image_folder), key=lambda x: int(x.split('img')[1].split('.')[0]))

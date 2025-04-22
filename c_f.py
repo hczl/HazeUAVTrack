@@ -11,8 +11,8 @@ matplotlib.use('TkAgg')
 
 # -----------------输入主文件夹路径--------------#
 main_img_path = Path(r'.\data\UAV-M\UAV-benchmark-M')  # 主文件夹路径
-depth_path = Path(r'data/MiDaS_Deep_UAV-M\save_test')
-hazy_path = Path(r'data/MiDaS_Deep_UAV-M\hazy_test')
+depth_path = Path(r'data/UAV-M/MiDaS_Deep_UAV-benchmark-M\save_test')
+hazy_path = Path(r'data/UAV-M/MiDaS_Deep_UAV-benchmark-M\hazy_test')
 
 # -----------------雾气强度控制因子----------------------#
 fog_strength = 1.0

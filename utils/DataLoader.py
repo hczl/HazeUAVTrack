@@ -46,12 +46,9 @@ class UAVDataLoaderBuilder:
     def apply_processing(self, dataset_path):
         path = dataset_path
         if self.haze_method != "None":
-            haze_path = f"./process/haze/{self.haze_method}.py"
+            haze_path = f"./haze/{self.haze_method}.py"
             path = self.call_processing_function(haze_path, "haze", path)
 
-            if self.dehaze_method != "None":
-                dehaze_path = f"./process/dehaze/{self.dehaze_method}.py"
-                path = self.call_processing_function(dehaze_path, "dehaze", path)
 
         return path
 
@@ -90,7 +87,7 @@ class UAVDataLoaderBuilder:
     def build(self, train_ratio=0.7, val_ratio=0.2):
         video_folders = sorted(os.listdir(self.image_root))
         random.shuffle(video_folders)
-
+        print(video_folders)
         n = len(video_folders)
         train_end = int(n * train_ratio)
         val_end = train_end + int(n * val_ratio)
@@ -98,7 +95,6 @@ class UAVDataLoaderBuilder:
         train_set = video_folders[:train_end]
         val_set = video_folders[train_end:val_end]
         test_set = video_folders[val_end:]
-
         datasets = {}
         for split_name, video_list in [('train', train_set), ('val', val_set), ('test', test_set)]:
             all_imgs, all_labels = [], []

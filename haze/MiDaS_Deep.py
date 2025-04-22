@@ -8,15 +8,17 @@ from tqdm import tqdm
 
 def haze(input_path):
     input_path = Path(input_path)
+    print(input_path)
     dataset_name = input_path.name
     base_output = Path(f"MiDaS_Deep_{dataset_name}")
     depth_path = base_output / 'depth_temp'
-    hazy_path = base_output
-    if os.path.exists(input_path.parent / f"MiDaS_Deep_{dataset_name}"):
-        return str(hazy_path.resolve())
     # 清空旧深度图
     if depth_path.exists():
         shutil.rmtree(depth_path)
+    hazy_path = base_output
+    if os.path.exists(input_path.parent / f"MiDaS_Deep_{dataset_name}"):
+        return input_path.parent / f"MiDaS_Deep_{dataset_name}"
+
 
     # 模型加载
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
