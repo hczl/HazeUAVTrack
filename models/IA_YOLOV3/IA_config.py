@@ -19,9 +19,9 @@ class Settings:
         # gamma filter的压缩范围
         self.gamma_range = 3
 
-
-
         # ToneFilter的压缩范围
         self.tone_curve_range = (0.5, 2)
 
+        # USMFilter的压缩范围
+        self.usm_range = (0.0, 5)
 

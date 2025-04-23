@@ -3,18 +3,18 @@ import pandas as pd
 import os
 
 # 读取标签数据
-data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0201_gt_whole.txt', header=None,
+data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0901_gt_whole.txt', header=None,
                    names=['frame_index', 'target_id', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height',
                           'out_of_view', 'occlusion', 'object_category'])
 
 # 图像文件夹路径
-image_folder = 'data/MiDaS_Deep_UAV-benchmark-M/M0201'
+image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0901'
 
 # 获取所有图像文件名并排序，确保按照文件名中的数字部分排序
 image_files = sorted(os.listdir(image_folder), key=lambda x: int(x.split('img')[1].split('.')[0]))
 
 # 输出视频的设置
-frame_width = 1024  # 设置输出视频的宽度
+frame_width = 960  # 设置输出视频的宽度
 frame_height = 540  # 设置输出视频的高度
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 使用mp4格式
 out = cv2.VideoWriter('output_video.mp4', fourcc, 30.0, (frame_width, frame_height))

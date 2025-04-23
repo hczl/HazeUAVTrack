@@ -6,21 +6,18 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-def haze(input_path):
+def MiDaS_Deep(input_path):
     input_path = Path(input_path)
-    print(input_path)
+    # print(input_path)
     dataset_name = input_path.name
-    base_output = Path(f"MiDaS_Deep_{dataset_name}")
+    base_output = input_path.parent /Path(f"MiDaS_Deep_{dataset_name}")
     depth_path = base_output / 'depth_temp'
-    # 清空旧深度图
     if depth_path.exists():
         shutil.rmtree(depth_path)
     hazy_path = base_output
     if os.path.exists(input_path.parent / f"MiDaS_Deep_{dataset_name}"):
         return input_path.parent / f"MiDaS_Deep_{dataset_name}"
 
-
-    # 模型加载
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model_type = 'DPT_Large'
     torch.hub.set_dir('/path/to/custom/cache')  # 可自定义
@@ -29,7 +26,6 @@ def haze(input_path):
     midas.to(device)
     midas.eval()
 
-    # 雾气参数
     fog_strength = 1.0
     fog_color = np.array([200, 200, 200], dtype=np.uint8)
 
@@ -37,17 +33,22 @@ def haze(input_path):
 
     for subfolder in subfolders:
         img_path = input_path / subfolder
+        # print(img_path)
         current_depth_path = depth_path / subfolder
         current_hazy_path = hazy_path / subfolder
         os.makedirs(current_depth_path, exist_ok=True)
         os.makedirs(current_hazy_path, exist_ok=True)
 
         imglist = sorted(os.listdir(img_path))
+        depth_maps = []  # [MODIFIED] 存储所有深度图
+
         with tqdm(total=len(imglist), desc=f'{subfolder} - 深度图') as pbar:
             for img_name in imglist:
                 img_file = img_path / img_name
                 image = cv2.imread(str(img_file))
                 if image is None:
+                    depth_maps.append(None)
+                    pbar.update(1)
                     continue
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -60,18 +61,32 @@ def haze(input_path):
                 depth_map_norm = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
                 resized_depth = cv2.resize(depth_map_norm, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LANCZOS4)
-                cv2.imwrite(str(current_depth_path / img_name), resized_depth)
+                depth_maps.append(resized_depth)  # [MODIFIED] 添加到列表中
 
+                cv2.imwrite(str(current_depth_path / img_name), resized_depth)
                 pbar.update(1)
 
-        with tqdm(total=len(imglist), desc=f'{subfolder} - 生成雾图') as pbar:
-            for img_name in imglist:
-                img_file = img_path / img_name
-                depth_file = current_depth_path / img_name
+        # [MODIFIED] 深度图滑动平均
+        smoothed_depth_maps = []
+        window_size = 5
+        for i in range(len(depth_maps)):
+            if depth_maps[i] is None:
+                smoothed_depth_maps.append(None)
+                continue
+            start = max(0, i - window_size // 2)
+            end = min(len(depth_maps), i + window_size // 2 + 1)
+            window = [d for d in depth_maps[start:end] if d is not None]
+            smoothed = np.mean(window, axis=0)
+            smoothed_depth_maps.append(smoothed.astype(np.uint8))
 
+        with tqdm(total=len(imglist), desc=f'{subfolder} - 生成雾图') as pbar:
+            for idx, img_name in enumerate(imglist):
+                img_file = img_path / img_name
                 image = cv2.imread(str(img_file))
-                depth = cv2.imread(str(depth_file), cv2.IMREAD_GRAYSCALE)
+                depth = smoothed_depth_maps[idx]  # [MODIFIED]
+
                 if image is None or depth is None:
+                    pbar.update(1)
                     continue
 
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -83,11 +98,11 @@ def haze(input_path):
                 foggy = np.clip(foggy, 0, 255).astype(np.uint8)
 
                 output_file = current_hazy_path / img_name
+                # print(output_file)
                 cv2.imwrite(str(output_file), cv2.cvtColor(foggy, cv2.COLOR_RGB2BGR))
-
                 pbar.update(1)
+            print(f"雾图生成完成：{current_hazy_path.resolve()}")
 
-    # 删除临时深度图
     if depth_path.exists():
         shutil.rmtree(depth_path)
 

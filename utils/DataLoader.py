@@ -26,6 +26,7 @@ class UAVOriginalDataset(Dataset):
                     annotations.append(line.strip().split(','))
         if self.transform:
             img = self.transform(img)
+
         return img, annotations
 
 
@@ -38,6 +39,7 @@ class UAVDataLoaderBuilder:
 
         self.image_root = os.path.join(self.root, config['dataset']['data_path'])
         self.label_root = os.path.join(self.root, config['dataset']['label_path'])
+        self.is_clean = config['is_clean']
         random.seed(self.seed)
 
         # 处理 haze/dehaze 方法
@@ -46,18 +48,16 @@ class UAVDataLoaderBuilder:
     def apply_processing(self, dataset_path):
         path = dataset_path
         if self.haze_method != "None":
-            haze_path = f"./haze/{self.haze_method}.py"
-            path = self.call_processing_function(haze_path, "haze", path)
-
-
+            path = self.call_processing_function(path)
         return path
 
-    def call_processing_function(self, script_path, func_name, input_path):
-        assert os.path.exists(script_path), f"Script not found: {script_path}"
-        spec = importlib.util.spec_from_file_location("process_module", script_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        func = getattr(mod, func_name)
+    def call_processing_function(self, input_path):
+
+        module = importlib.import_module(f'haze.{self.haze_method}')
+
+        # 获取函数
+        func = getattr(module, self.haze_method)
+        print(input_path)
         return func(input_path)
 
     def parse_labels_to_frames(self, label_file):
@@ -84,7 +84,7 @@ class UAVDataLoaderBuilder:
             label_files.append(label_file)
         return image_files, label_files
 
-    def build(self, train_ratio=0.7, val_ratio=0.2):
+    def build(self, train_ratio=0.7, val_ratio=0.2,transform=None):
         video_folders = sorted(os.listdir(self.image_root))
         random.shuffle(video_folders)
         print(video_folders)
@@ -105,5 +105,18 @@ class UAVDataLoaderBuilder:
                 imgs, labels = self.extract_labels(vid_folder, label_file, label_save_folder)
                 all_imgs.extend(imgs)
                 all_labels.extend(labels)
-            datasets[split_name] = UAVOriginalDataset(all_imgs, all_labels)
-        return datasets['train'], datasets['val'], datasets['test']
+            datasets[split_name] = UAVOriginalDataset(all_imgs, all_labels, transform)
+        if self.is_clean:
+            clean_set = video_folders[:train_end]
+            all_imgs, all_labels = [], []
+            for vid in clean_set:
+                vid_folder = os.path.join(self.image_root, vid)
+                label_file = os.path.join(self.label_root, f"{vid}_gt_whole.txt")
+                label_save_folder = os.path.join(self.root, 'frame_labels', split_name, vid)
+                imgs, labels = self.extract_labels(vid_folder, label_file, label_save_folder)
+                all_imgs.extend(imgs)
+                all_labels.extend(labels)
+            datasets['clean'] = UAVOriginalDataset(all_imgs, all_labels, transform)
+            return datasets['train'], datasets['val'], datasets['test'], datasets['clean']
+        else:
+            return datasets['train'], datasets['val'], datasets['test'], None

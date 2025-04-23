@@ -1,17 +1,21 @@
+import os
+
 import torch
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader, Dataset
+from ultralytics import YOLO
+
 from IA_config import Settings
 from CNN_PP import CNN_PP
 from models.IA_YOLOV3.DIP import DIP_Module
 from models.IA_YOLOV3.utils import AtmLight,DarkIcA,DarkChannel
-from models.IA_YOLOV3.yolov3 import yolov3
 from utils import load_config
 import torch.nn.functional as F
 
 class IA_YOLOV3(nn.Module):
     def __init__(self, config, train_dataloader, val_dataloader):
+
         super(IA_YOLOV3, self).__init__()
         self.IA_config = Settings()
         self.config = config
@@ -19,7 +23,45 @@ class IA_YOLOV3(nn.Module):
         self.val_dataloader = val_dataloader
         self.cnn_pp = CNN_PP(self.IA_config.dip_nums)
         self.dip_module = DIP_Module(self.IA_config)
-        self.yolov3 = yolov3()
+        # 从pytorch hub下载yolov3
+        try:
+            print("Loading YOLOv3u model using ultralytics.YOLO...")
+            # 使用 YOLO("yolov3u.pt") 加载模型。
+            # 它会自动下载 yolov3u.pt 文件（如果本地没有）并加载权重。
+            yolo_wrapper = YOLO("yolov3u.pt")
+            print("YOLOv3u model loaded.")
+
+            # 提取底层的 PyTorch nn.Module
+            # 在 Ultralytics 库中，底层的模型通常存储在 .model 属性中
+            # 需要检查具体版本或代码来确认，但 .model 是一个常见模式
+            if hasattr(yolo_wrapper, 'model') and isinstance(yolo_wrapper.model, nn.Module):
+                self.yolov3 = yolo_wrapper.model
+                print("Extracted underlying nn.Module from YOLO wrapper.")
+            else:
+                raise AttributeError("Could not find the underlying nn.Module in the YOLO object. "
+                                     "The structure of ultralytics.YOLO might have changed.")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()  # 释放 GPU 内存（如果使用了）
+            # Display model information (optional)
+            # Display model information (optional)
+            # self.yolov3.info()
+
+            # 查找并修改 Detect 层
+            # 尝试获取原始模型的类别数 nc，虽然对于切片操作不是必需的，但有助于理解
+            self.original_nc = None
+            # 查找 Detect 模块以获取 nc
+            detect_module = None
+            for module in self.yolov3.modules():
+                # 类名可能随版本变化，用 type().__name__ 更健壮些
+                if type(module).__name__ == 'Detect':
+                    detect_module = module
+                    break
+            self.original_nc = detect_module.nc
+            # print(f"检测到原始模型类别数 (nc): {self.original_nc}")
+
+        except Exception as e:
+            print(f"Error : {e}")
+            raise e  # 重新抛出异常
 
     def forward(self,inputs):
         n, c, _, _ = inputs.shape
@@ -41,17 +83,12 @@ class IA_YOLOV3(nn.Module):
         IcA = torch.unsqueeze(IcA, dim=1)
 
         filter_features = self.cnn_pp(resized_inputs)
-        # filter_features = torch.unsqueeze(filter_features, dim=1)
-        # print("filter_features", filter_features.shape)
-        dip_processed_output = self.dip_module(inputs, filter_features, defog_A, IcA)
+        dip_output = self.dip_module(inputs, filter_features, defog_A, IcA)
+        # print(dip_output.shape)
+        yolov3_outputs = self.yolov3(dip_output)
+        return yolov3_outputs
         # yolov3_predictions = self.yolov3_model(dip_processed_output) # DIP output to YOLOv3
         # return cnn_pp_output, yolov3_predictions # Return both outputs for loss calculation if needed
-
-    def calculate_detection_loss(self, yolov3_predictions, targets):
-        return self.detection_loss_criterion(yolov3_predictions, targets)
-
-    def calculate_cnn_pp_loss(self, cnn_pp_output, targets_cnn_pp): # Placeholder CNN-PP Loss
-        return torch.mean(cnn_pp_output - targets_cnn_pp)**2 # Example loss
 
     def train_step(self, batch):
         low_res_images, high_res_images, targets_yolov3, targets_cnn_pp = batch # Assuming batch returns both inputs and targets
@@ -193,8 +230,8 @@ if __name__ == '__main__':
     train_dataset = DummyDataset()
     val_dataset = DummyDataset()
 
-    train_dataloader = DataLoader(train_dataset, batch_size=2) # Small batch size for testing
-    val_dataloader = DataLoader(val_dataset, batch_size=2)
+    train_dataloader = DataLoader(train_dataset, batch_size=4) # Small batch size for testing
+    val_dataloader = DataLoader(val_dataset, batch_size=4)
 
     # 3. Instantiate the model
     model = IA_YOLOV3(cfg, train_dataloader, val_dataloader)
@@ -209,8 +246,17 @@ if __name__ == '__main__':
     model.optimizer = optimizer # Add optimizer to the model
 
     # 6. Test forward pass
-    dummy_input = torch.randn(2, 3, 1024, 520).to(device) # Batch of 2, 3 channels, 512x512
-    model(dummy_input)
+    dummy_input = torch.randn(4, 3, 1024, 540).to(device) # Batch of 2, 3 channels, 512x512
+    output = model(dummy_input)
+    def see(a):
+        try:
+            if len(a):
+                see(a[0])
+                print(len(a))
+        except:
+            pass
+
+    see(output[1])
     # cnn_pp_output, yolov3_predictions = model(dummy_input)
     # print("CNN_PP Output Shape:", cnn_pp_output[0].shape) # Print shape of filter_features
     # print("YOLOv3 Predictions Shape:", yolov3_predictions.shape)

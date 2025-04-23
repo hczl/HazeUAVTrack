@@ -27,3 +27,6 @@ save_output: true
 
 # 随机种子
 seed: 2025
+
+# 是否用到干净数据集
+is_clean: True
