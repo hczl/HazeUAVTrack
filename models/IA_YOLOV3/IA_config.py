@@ -25,3 +25,7 @@ class Settings:
         # USMFilter的压缩范围
         self.usm_range = (0.0, 5)
 
+        # 预热训练的epoch数
+        self.warmup_epochs = 20
+
+

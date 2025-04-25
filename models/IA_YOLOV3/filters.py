@@ -2,38 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils import lrelu, rgb2lum, tanh_range, lerp
-
-# class UsmProcess_sigma(nn.Module): # sigma 可变的 USM
-#     def __init__(self, usm_range):
-#         super().__init__()
-#         self.usm_range = usm_range
-#
-#     def forward(self, img, param):
-#         def make_gaussian_2d_kernel(sigma, dtype=torch.float32):
-#             radius = 12
-#             x = torch.arange(-radius, radius + 1, dtype=dtype)
-#             k = torch.exp(-0.5 * (x / sigma)**2)
-#             k = k / torch.sum(k)
-#             return k.unsqueeze(1) * k.unsqueeze(0)
-#
-#         kernel_i_list = []
-#         for i in range(param.shape[0]): # 假设param是batch_size
-#             kernel_i = make_gaussian_2d_kernel(param[i])
-#             kernel_i_list.append(kernel_i)
-#         kernel_i = torch.stack(kernel_i_list).unsqueeze(1) # [batch_size, 1, 25, 25]
-#
-#         pad_w = (25 - 1) // 2
-#         padded = F.pad(img, (pad_w, pad_w, pad_w, pad_w), mode='reflect')
-#         outputs = []
-#         for channel_idx in range(img.shape[1]): # 遍历通道维度
-#             data_c = padded[:, channel_idx:(channel_idx + 1), :, :] # 通道索引调整
-#             data_c = F.conv2d(data_c, kernel_i, stride=1, padding='valid', groups=img.shape[0]) # groups for batch-wise kernel
-#             outputs.append(data_c)
-#
-#         output = torch.cat(outputs, dim=1)
-#         img_out = (img - output) * param[:, None, None, :] + img
-#         return img_out
+from .yolo_utils import lrelu, rgb2lum, tanh_range, lerp
 
 
 class DefogFilter(nn.Module):
@@ -47,7 +16,7 @@ class DefogFilter(nn.Module):
         tx = 1 - param[:, None, None, None]*IcA
         tx_1 = tx.repeat(1, 3, 1, 1) # [B, 1, 1, 1] -> [B, 3, 1, 1]
         defog_A_expand = defog_A[:, :, None, None].repeat(1, 1, img.shape[2], img.shape[3]) # [B, 3] -> [B, 3, H, W]
-        return (img - defog_A_expand) / torch.maximum(tx_1, torch.tensor(0.01)) + defog_A_expand
+        return (img - defog_A_expand) / torch.maximum(tx_1, torch.tensor(0.01).to(img.device)) + defog_A_expand # 确保常数张量也在同一设备
 
 class ImprovedWhiteBalanceFilter(nn.Module):
     def __init__(self):
@@ -59,10 +28,16 @@ class ImprovedWhiteBalanceFilter(nn.Module):
         assert mask.shape == (1, 3)
         features = features * mask
         color_scaling = torch.exp(tanh_range(-log_wb_range, log_wb_range)(features))
-        color_scaling *= 1.0 / (
+
+        # --- FIX: Replace inplace *= with out-of-place * ---
+        multiplier = 1.0 / (
                                        1e-5 + 0.27 * color_scaling[:, 0] + 0.67 * color_scaling[:, 1] +
                                        0.06 * color_scaling[:, 2])[:, None]
+        color_scaling = color_scaling * multiplier # Create a new tensor
+        # --- END FIX ---
+
         return color_scaling
+
     def forward(self, img, param):
         param = self.filter_param_regressor(param)
         return img * param[:, :, None, None]
@@ -93,13 +68,22 @@ class ColorProcess(nn.Module):
     def forward(self, img, param, defog_A, IcA): # 忽略 defog_A, IcA 参数
         color_curve = param # shape already (B, 1, 1, 3, curve_steps)
         color_curve_sum = torch.sum(color_curve, dim=4, keepdim=True) + 1e-30
-        total_image = img * 0
+        # Using img * 0 or torch.zeros_like(img) both create a new tensor,
+        # so the += operation inside the loop is generally safe.
+        # total_image = img * 0
+        total_image = torch.zeros_like(img) # More explicit initialization
+
         for i in range(self.curve_steps):
             clip_min = 1.0 * i / self.curve_steps
             clip_max = 1.0 / self.curve_steps
             clipped_img = torch.clamp(img - clip_min, 0, clip_max)
             total_image += clipped_img * color_curve[:, :, :, :, i] # color_curve[:, :, :, :, i] shape (B, 1, 1, 3, 1)
-        total_image *= self.curve_steps / color_curve_sum.squeeze(4) # color_curve_sum.squeeze(4) shape (B, 1, 1, 3)
+
+        # --- FIX: Replace inplace *= with out-of-place * ---
+        multiplier = self.curve_steps / color_curve_sum.squeeze(4)
+        total_image = total_image * multiplier # Create a new tensor
+        # --- END FIX ---
+
         return total_image
 
 class ToneFilter(nn.Module):
@@ -120,16 +104,22 @@ class ToneFilter(nn.Module):
 
         # print(tone_curve.shape)
         tone_curve_sum = torch.sum(tone_curve.squeeze(4), dim=1, keepdim=True) + 1e-30
-        total_image = img * 0
+        # Using img * 0 or torch.zeros_like(img) both create a new tensor,
+        # so the += operation inside the loop is generally safe.
+        # total_image = img * 0
+        total_image = torch.zeros_like(img) # More explicit initialization
+
         for i in range(self.curve_steps):
             clip_min = 1.0 * i / self.curve_steps
             clip_max = 1.0 / self.curve_steps
             clipped_img = torch.clamp(img - clip_min, 0, clip_max)
-            # print(clipped_img.shape, tone_curve[:, i, :, :, :].shape)
             total_image += clipped_img * tone_curve[:, i, :, :, :] # tone_curve[:, :, :, :, i] shape (B, 1, 1, 1, 1)
-            # print(tone_curve[:, :, :, :, i].shape)
-        # print((self.curve_steps / tone_curve_sum).shape)
-        total_image *= self.curve_steps / tone_curve_sum# tone_curve_sum.squeeze(4) shape (B, 1, 1, 1)
+
+        # --- FIX: Replace inplace *= with out-of-place * ---
+        multiplier = self.curve_steps / tone_curve_sum
+        total_image = total_image * multiplier # Create a new tensor
+        # --- END FIX ---
+
         return total_image
 
 
@@ -145,6 +135,8 @@ class ContrastFilter(nn.Module):
         param = self.filter_param_regressor(param)
         luminance = torch.clamp(rgb2lum(img), 0.0, 1.0)
         contrast_lum = -torch.cos(np.pi * luminance) * 0.5 + 0.5
+        # Note: The division by luminance can result in NaN/Inf if luminance is 0.
+        # Adding a small epsilon (1e-6) helps, but consider if this calculation is numerically stable.
         contrast_image = img / (luminance[:, None, :, :] + 1e-6) * contrast_lum[:, None, :, :]
         # print(contrast_image.shape,param[:, None, None, None].shape)
         return lerp(img, contrast_image, param[:, None, None, None])
@@ -171,16 +163,19 @@ class UsmFilter(nn.Module):
         kernel_i = make_gaussian_2d_kernel(torch.tensor(5.0))  # 固定 sigma=5
         kernel_i = kernel_i.unsqueeze(0).unsqueeze(0).repeat(1, 1, 1, 1)  # [1, 1, 25, 25]
 
-        kernel_i = kernel_i.to(img.device)
+        kernel_i = kernel_i.to(img.device) # Ensure kernel is on the correct device
 
         pad_w = (25 - 1) // 2
         padded = F.pad(img, (pad_w, pad_w, pad_w, pad_w), mode='reflect')
         outputs = []
-        for channel_idx in range(img.shape[1]):  # 遍历通道维度
-            data_c = padded[:, channel_idx:(channel_idx + 1), :, :]  # 通道索引调整
+        # Perform convolution channel by channel as the kernel is not batched
+        # Alternatively, you could use groups=img.shape[0] if kernel_i was [B, 1, H, W]
+        for channel_idx in range(img.shape[1]):
+            data_c = padded[:, channel_idx:(channel_idx + 1), :, :]
             data_c = F.conv2d(data_c, kernel_i, stride=1, padding='valid')
             outputs.append(data_c)
 
         output = torch.cat(outputs, dim=1)
+        # This operation creates a new tensor, so it's not inplace
         img_out = (img - output) * param[:, None, None, None] + img
         return img_out

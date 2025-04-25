@@ -1,10 +1,18 @@
 import os
+
+import torch
 import yaml
 import random
 import importlib.util
 from glob import glob
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+
+def custom_collate_fn(batch):
+    images, labels = zip(*batch)  # list of images, list of label lists
+    images = torch.stack(images, dim=0)  # [B, C, H, W]
+    labels = [torch.tensor(label, dtype=torch.float32) for label in labels]  # list of [N_i, 9] tensors
+    return images, labels
 
 
 class UAVOriginalDataset(Dataset):
@@ -23,11 +31,12 @@ class UAVOriginalDataset(Dataset):
         if os.path.exists(label_path):
             with open(label_path, 'r') as f:
                 for line in f:
-                    annotations.append(line.strip().split(','))
+                    fields = list(map(float, line.strip().split(',')))  # 字符转 float
+                    annotations.append(fields)
         if self.transform:
             img = self.transform(img)
 
-        return img, annotations
+        return img, annotations  # annotations: List[List[float]]
 
 
 class UAVDataLoaderBuilder:
@@ -87,7 +96,7 @@ class UAVDataLoaderBuilder:
     def build(self, train_ratio=0.7, val_ratio=0.2,transform=None):
         video_folders = sorted(os.listdir(self.image_root))
         random.shuffle(video_folders)
-        print(video_folders)
+        # print(video_folders)
         n = len(video_folders)
         train_end = int(n * train_ratio)
         val_end = train_end + int(n * val_ratio)
@@ -112,7 +121,7 @@ class UAVDataLoaderBuilder:
             for vid in clean_set:
                 vid_folder = os.path.join(self.image_root, vid)
                 label_file = os.path.join(self.label_root, f"{vid}_gt_whole.txt")
-                label_save_folder = os.path.join(self.root, 'frame_labels', split_name, vid)
+                label_save_folder = os.path.join(self.root, 'frame_labels', 'clean', vid)  # 修改这里
                 imgs, labels = self.extract_labels(vid_folder, label_file, label_save_folder)
                 all_imgs.extend(imgs)
                 all_labels.extend(labels)
