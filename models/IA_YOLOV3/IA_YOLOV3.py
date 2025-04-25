@@ -23,6 +23,7 @@ class IA_YOLOV3(nn.Module):
     def __init__(self, config):
 
         super(IA_YOLOV3, self).__init__()
+        self.val_batch_nums = None
         self.train_batch_nums = None
         self.IA_config = Settings()
         self.config = config
@@ -133,45 +134,38 @@ class IA_YOLOV3(nn.Module):
         print(f"Epoch {epoch} 训练完成，平均 YOLOv3 Loss: {avg_yolov3_loss:.4f}, 平均 DIP Loss: {avg_dip_loss:.4f}")
         return {'avg_yolov3_loss': avg_yolov3_loss, 'avg_dip_loss': avg_dip_loss}
 
-    def evaluate(self, val_loader, clean_loader):
-        self.eval()
+    def evaluate(self, val_loader):
         total_yolov3_loss = 0.0
-        total_dip_loss = 0.0
         batch_count = 0
 
         with torch.no_grad():
-            for batch_idx, (val_batch, clean_batch) in enumerate(zip(val_loader, clean_loader)):
+            pbar = tqdm(val_loader, total=self.val_batch_nums, desc=f"Val")
+            for batch_idx, val_batch in enumerate(pbar):
                 # 获取输入和标签
                 low_res_images, targets_yolov3 = val_batch
-                targets_dip, _ = clean_batch
 
                 # 移动到设备
                 low_res_images = low_res_images.to(self.device)
-                targets_yolov3 = targets_yolov3.to(self.device)
-                targets_dip = targets_dip.to(self.device)
-
-                # DIP前向
-                dip_output = self(low_res_images, detach_dip=True)
-                dip_loss = self.calculate_dip_loss(dip_output, targets_dip)
 
                 # YOLO前向
-                yolov3_output = self(low_res_images, yolo_predict = True)
-                yolov3_loss_dict = self.yolov3_wrapper.loss(targets_yolov3, yolov3_output)
-                yolov3_loss = yolov3_loss_dict['loss']
+                yolov3_output = self(low_res_images, yolo_forward=True)
+                yolov3_loss_tuple = self.yolov3_wrapper.loss(targets_yolov3, yolov3_output)
+                yolov3_loss = sum([t.sum() for t in yolov3_loss_tuple])
 
-                # 累加
-                total_dip_loss += dip_loss.item()
                 total_yolov3_loss += yolov3_loss.item()
                 batch_count += 1
+                if batch_idx % self.config['train']['log_interval'] == 0:
+                    pbar.set_postfix({
+                        'YOLOv3 Loss': f'{yolov3_loss:.4f}',
+                        'Batch': f'{batch_idx + 1}/{self.val_batch_nums}'
+                    })
 
-        avg_dip_loss = total_dip_loss / batch_count
         avg_yolov3_loss = total_yolov3_loss / batch_count
 
         print(
-            f"验证集 Avg YOLOv3 Loss: {avg_yolov3_loss:.4f}, Avg DIP Loss: {avg_dip_loss:.4f}")
+            f"验证集 Avg YOLOv3 Loss: {avg_yolov3_loss:.4f}")
         return {
-            'avg_yolov3_loss': avg_yolov3_loss,
-            'avg_dip_loss': avg_dip_loss
+            'avg_yolov3_loss': avg_yolov3_loss
         }
 
     def predict(self, high_res_images):
@@ -222,7 +216,7 @@ class IA_YOLOV3(nn.Module):
         best_loss = float('inf')
         # 训练前预处理
         train_loader, self.train_batch_nums= process_and_return_loaders(train_loader)
-        val_loader, _ = process_and_return_loaders(val_loader)
+        val_loader, self.val_batch_nums = process_and_return_loaders(val_loader)
         clean_loader,_ = process_and_return_loaders(clean_loader)
         if self.config['train']['resume_training']:
             print("==> 尝试加载最近 checkpoint ...")
@@ -249,14 +243,15 @@ class IA_YOLOV3(nn.Module):
             # print(f"\nEpoch {epoch + 1}/{num_epochs}")
             # # progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
 
-            self.train_epoch(train_loader, clean_loader, epoch)
+            # self.train_epoch(train_loader, clean_loader, epoch)
 
             # 验证集
             if val_loader:
-                self.eval()
-                val_stats = self.evaluate(val_loader, clean_loader)
-                # val_loss = val_stats['avg_val_loss']
-                # print(f"==> Validation Avg Loss: {val_loss:.4f}")
+                self.yolov3.eval()
+                self.cnn_pp.eval()
+                self.dip_module.eval()
+
+                val_stats = self.evaluate(val_loader)
 
                 # 保存最优模型
                 if val_stats['avg_yolov3_loss'] < best_loss:
