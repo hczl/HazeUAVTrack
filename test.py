@@ -49,17 +49,16 @@ for image_file in image_files:
         # 在左上角添加标签
         cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     for _, row in frame_data1.iterrows():
-        # 提取边界框信息
-        x, y, w, h = int(row['bbox_left']), int(row['bbox_top']), int(row['bbox_width']), int(row['bbox_height'])
+        bbox_left = int(row['bbox_left'])
+        bbox_top = int(row['bbox_top'])
+        bbox_width = int(row['bbox_width'])
+        bbox_height = int(row['bbox_height'])
 
-        # 获取目标ID作为标签
-        label = f"ID: {row['target_id']}"
-
-        # 绘制边界框
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 使用绿色框
-
-        # 在左上角添加标签
-        cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        x1 = max(0, min(frame_width - 1, bbox_left))
+        y1 = max(0, min(frame_height - 1, bbox_top))
+        x2 = max(0, min(frame_width - 1, bbox_left + bbox_width))
+        y2 = max(0, min(frame_height - 1, bbox_top + bbox_height))
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 0), -1)  # 黑色填充，thickness 设置为 -1
 
     # 将修改后的帧写入输出视频
     out.write(frame)

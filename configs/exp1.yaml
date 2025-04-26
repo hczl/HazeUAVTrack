@@ -18,19 +18,21 @@ iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  batch: 8
   is_mask: True
   path: "./data/UAV-M"
   data_path: "UAV-benchmark-M"
   label_path: "UAV-benchmark-MOTD_v1.0/GT"
-
+  is_clean: True
 # 是否保存可视化结果
 save_output: true
 
 # 随机种子
 seed: 2025
 
-# 是否用到干净数据集
-is_clean: True
+
 
 # 训练参数
 train:
