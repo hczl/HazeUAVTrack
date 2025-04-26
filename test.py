@@ -3,12 +3,14 @@ import pandas as pd
 import os
 
 # 读取标签数据
-data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0902_gt_whole.txt', header=None,
+data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0605_gt_whole.txt', header=None,
                    names=['frame_index', 'target_id', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height',
                           'out_of_view', 'occlusion', 'object_category'])
-
+data1 = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0605_gt_ignore.txt', header=None,
+                   names=['frame_index', 'target_id', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height',
+                          'out_of_view', 'occlusion', 'object_category'])
 # 图像文件夹路径
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0902'
+image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0605'
 
 # 获取所有图像文件名并排序，确保按照文件名中的数字部分排序
 image_files = sorted(os.listdir(image_folder), key=lambda x: int(x.split('img')[1].split('.')[0]))
@@ -32,9 +34,21 @@ for image_file in image_files:
 
     # 获取当前帧的标签数据
     frame_data = data[data['frame_index'] == frame_index]
-
+    frame_data1 = data1[data1['frame_index'] == frame_index]
     # 遍历该帧的所有目标
     for _, row in frame_data.iterrows():
+        # 提取边界框信息
+        x, y, w, h = int(row['bbox_left']), int(row['bbox_top']), int(row['bbox_width']), int(row['bbox_height'])
+
+        # 获取目标ID作为标签
+        label = f"ID: {row['target_id']}"
+
+        # 绘制边界框
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 使用绿色框
+
+        # 在左上角添加标签
+        cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    for _, row in frame_data1.iterrows():
         # 提取边界框信息
         x, y, w, h = int(row['bbox_left']), int(row['bbox_top']), int(row['bbox_width']), int(row['bbox_height'])
 

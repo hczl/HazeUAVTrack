@@ -18,6 +18,7 @@ iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
+  is_mask: True
   path: "./data/UAV-M"
   data_path: "UAV-benchmark-M"
   label_path: "UAV-benchmark-MOTD_v1.0/GT"
