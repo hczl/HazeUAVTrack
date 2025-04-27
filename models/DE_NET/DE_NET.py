@@ -394,6 +394,7 @@ class DE_NET(nn.Module):
              print("加载的 YOLO 模型没有 'info()' 方法可供调用。")
 
     def train_step(self, tra_batch):
+        self.optimizer.zero_grad()
         torch.autograd.set_detect_anomaly(True)
 
         low_res_images, targets_yolov3 = tra_batch

@@ -61,6 +61,7 @@ class IA_YOLOV3(nn.Module):
         filter_features = self.cnn_pp(resized_inputs)
         # print("filter_features", filter_features.shape)
         dip_output = self.dip_module(inputs, filter_features, defog_A, IcA)
+
         if detach_dip:
             return dip_output
         elif self.training and yolo_forward:
@@ -90,6 +91,7 @@ class IA_YOLOV3(nn.Module):
         self.optimizer.zero_grad()
         # print(targets_yolov3[0].shape)
         dip_output= self(low_res_images, detach_dip=True)
+
         dip_loss = self.calculate_dip_loss(dip_output, targets_dip)
         dip_loss.backward(retain_graph=True)
         # forward 返回 DIP 输出 和 yolov3 的 multi-scale 输出

@@ -153,7 +153,7 @@ class UAVDataLoaderBuilder:
                                 x2 = max(0, min(img_width - 1, bbox_left + bbox_width))
                                 y2 = max(0, min(img_height - 1, bbox_top + bbox_height))
 
-                                draw.rectangle([(x1, y1), (x2, y2)], fill='black', outline='black')
+                                draw.rectangle([(x1, y1), (x2, y2)], fill=(128,128,128), outline='black')
                             except ValueError:
                                 print(f"警告: 跳过忽略文件中边界框数据的非数字值 {ignore_file_path}: {line.strip()}")
                                 continue

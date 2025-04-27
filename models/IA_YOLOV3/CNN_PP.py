@@ -16,6 +16,7 @@ class CNN_PP(nn.Module):
         self.fc2 = nn.Linear(64, out_dim)
 
     def forward(self, x):
+
         x = F.relu(self.conv0(x))
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
