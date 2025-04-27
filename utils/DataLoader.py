@@ -1,5 +1,8 @@
 import os
 import sys
+
+import cv2
+import pandas as pd
 import torch
 import yaml
 import random
@@ -125,65 +128,164 @@ class UAVDataLoaderBuilder:
 
         print(f"最终用于数据集构建的图像根目录: {self.image_root}")
 
+    def _load_all_ignore_data(self):
+        """
+        加载所有 _gt_ignore.txt 文件中的忽略边界框数据到 pandas DataFrame。
+        假设文件格式为: frame_index, ..., bbox_left, bbox_top, bbox_width, bbox_height, ...
+        """
+        print(f"正在从 {self.label_root} 加载忽略边界框数据...")
+        all_data = []
 
-    def _apply_mask_to_image(self, image_path, ignore_file_path):
-        """加载图像，根据忽略文件应用掩膜，返回掩膜后的 PIL 图像。"""
-        try:
-            img = Image.open(image_path).convert("RGB")
-            draw = ImageDraw.Draw(img)
-            img_width, img_height = img.size
+        if not os.path.exists(self.label_root):
+            print(f"警告: 标签根目录未找到: {self.label_root}。将不会应用任何掩膜。")
+            # 返回一个空的 DataFrame，确保后续处理不会出错
+            return pd.DataFrame(
+                columns=['video_folder', 'frame_index', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height'])
+
+        # 遍历 label_root 下的所有文件，查找 _gt_ignore.txt
+        # 假设文件名格式是 {video_folder_name}_gt_ignore.txt
+        # 需要获取所有视频文件夹的名称，以便匹配忽略文件
+        # 可以从 original_image_root 获取视频文件夹列表
+        video_folders_to_process = sorted([d for d in os.listdir(self.original_image_root) if
+                                           os.path.isdir(os.path.join(self.original_image_root, d))])
+
+        for vid_folder_name in video_folders_to_process:
+            ignore_file_path = os.path.join(self.label_root, f"{vid_folder_name}_gt_ignore.txt")
 
             if not os.path.exists(ignore_file_path):
-                return img  # 没有忽略文件则返回原图
+                # print(f"  忽略文件未找到，跳过加载 {ignore_file_path}") # 可以在这里打印每个缺失文件的警告
+                continue  # 跳过这个视频文件夹对应的忽略文件加载
 
-            with open(ignore_file_path, 'r') as f:
-                # print(ignore_file_path)
-                for line in f:
-                    try:
-                        parts = line.strip().split(',')
-                        if len(parts) == 9:
+            try:
+                with open(ignore_file_path, 'r') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line or line.startswith('#'):  # 跳过空行或注释行
+                            continue
+                        parts = line.split(',')
+                        # 根据原始 _apply_mask_to_image 中的解析逻辑，需要至少9个部分
+                        # 但实际只需要 frame_index (parts[0]) 和 bbox (parts[2]到parts[5])
+                        # 如果确定格式是 frame_index, ..., bbox_left, bbox_top, bbox_width, bbox_height, ...
+                        # 那么只需要检查是否有足够的元素来提取需要的字段
+                        if len(parts) >= 6:  # 需要 frame_index (0), bbox_left (2), bbox_top (3), bbox_width (4), bbox_height (5)
                             try:
-                                bbox_left = int(float(parts[2]))
+                                # 假设 frame_index 是第一个元素 (parts[0])
+                                frame_index = int(float(parts[0]))  # 使用 float 转换以处理可能的浮点数
+                                bbox_left = int(float(parts[2]))  # 使用 float 转换以处理可能的浮点数
                                 bbox_top = int(float(parts[3]))
                                 bbox_width = int(float(parts[4]))
                                 bbox_height = int(float(parts[5]))
 
-                                x1 = max(0, min(img_width - 1, bbox_left))
-                                y1 = max(0, min(img_height - 1, bbox_top))
-                                x2 = max(0, min(img_width - 1, bbox_left + bbox_width))
-                                y2 = max(0, min(img_height - 1, bbox_top + bbox_height))
-
-                                draw.rectangle([(x1, y1), (x2, y2)], fill=(128,128,128), outline='black')
+                                all_data.append({
+                                    'video_folder': vid_folder_name,  # 记录来自哪个视频文件夹
+                                    'frame_index': frame_index,
+                                    'bbox_left': bbox_left,
+                                    'bbox_top': bbox_top,
+                                    'bbox_width': bbox_width,
+                                    'bbox_height': bbox_height
+                                })
                             except ValueError:
-                                print(f"警告: 跳过忽略文件中边界框数据的非数字值 {ignore_file_path}: {line.strip()}")
-                                continue
+                                print(
+                                    f"警告: 跳过忽略文件 {ignore_file_path} 中格式错误的行 (非数字值) {line_num}: {line}")
+                            except IndexError:  # 理论上 len(parts) >= 6 应该避免 IndexErrors for 0,2,3,4,5, but good practice
+                                print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
+
                         else:
-                            print(f"警告: 忽略文件中行格式不正确 {ignore_file_path}: {line.strip()}")
-                            continue
-                    except ValueError:
-                        print(f"警告: 跳过忽略文件中的非数字数据或格式错误 {ignore_file_path}: {line.strip()}")
-                        continue
-            return img
-        except FileNotFoundError:
-            print(f"错误: 掩膜处理时图像文件未找到: {image_path}")
-            return None
-        except Exception as e:
-            print(f"错误: 应用掩膜到 {image_path} (使用 {ignore_file_path}) 时出错: {e}")
+                            print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
+
+
+            except Exception as e:
+                print(f"错误: 读取或解析忽略文件 {ignore_file_path} 失败: {e}")
+                # 可以在这里决定是否中断或继续处理其他文件
+
+        if not all_data:
+            print("警告: 未从任何忽略文件中加载到有效的边界框数据。所有图像将不会被掩膜。")
+            # 返回一个空的 DataFrame
+            return pd.DataFrame(
+                columns=['video_folder', 'frame_index', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height'])
+
+        df = pd.DataFrame(all_data)
+        # 可以选择在这里对 DataFrame 进行排序或索引，以便更快查询，例如按 video_folder 和 frame_index
+        # df = df.sort_values(by=['video_folder', 'frame_index']).set_index(['video_folder', 'frame_index']) # 设置索引可以加速查询，但会改变结构
+        # 简单的过滤查询通常也足够快
+        print(f"成功加载 {len(df)} 条忽略边界框数据。")
+        return df
+
+    # 修改 _apply_mask_to_image 方法，接受边界框列表
+    def _apply_mask_to_image(self, image_path, bboxes_to_mask):
+        """加载图像，根据提供的边界框列表应用掩膜，返回掩膜后的 PIL 图像。
+           内部使用 OpenCV 进行图像处理和绘制。
+           bboxes_to_mask: 一个列表，每个元素是一个字典，例如:
+           [{'left': l1, 'top': t1, 'width': w1, 'height': h1},
+            {'left': l2, 'top': t2, 'width': w2, 'height': h2}, ...]
+           如果列表为空，则不应用任何掩膜。
+        """
+        # 使用 OpenCV 读取图像
+        # cv2.imread 默认读取为 BGR 格式
+        img_cv2 = cv2.imread(image_path)
+
+        # 检查图像是否成功加载
+        if img_cv2 is None:
+            print(f"错误: 掩膜处理时图像文件未找到或无法加载: {image_path}")
             return None
 
+        # 获取图像尺寸 (OpenCV 格式是 高度, 宽度, 通道数)
+        img_height, img_width = img_cv2.shape[:2]
+
+        # 如果提供了边界框列表，则应用掩膜
+        if bboxes_to_mask:
+            # 遍历需要应用的边界框列表
+            for bbox in bboxes_to_mask:
+                try:
+                    # 从字典中提取边界框坐标和尺寸
+                    bbox_left = int(bbox['left'])
+                    bbox_top = int(bbox['top'])
+                    bbox_width = int(bbox['width'])
+                    bbox_height = int(bbox['height'])
+
+                    # 计算边界框的对角坐标 (x1, y1) 和 (x2, y2)
+                    # 并钳制到图像边界内
+                    x1 = max(0, min(img_width - 1, bbox_left))
+                    y1 = max(0, min(img_height - 1, bbox_top))
+                    x2 = max(0, min(img_width - 1, bbox_left + bbox_width))
+                    y2 = max(0, min(img_height - 1, bbox_top + bbox_height))
+
+                    # 在 OpenCV 图像上绘制填充的矩形作为掩膜
+                    # 颜色 (128, 128, 128) 是灰色，-1 表示填充整个矩形
+                    # 如果想用黑色，可以改为 (0, 0, 0)
+                    cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (128, 128, 128), -1)  # 使用原始代码的灰色
+
+                except KeyError as e:
+                    print(f"警告: 跳过格式错误的边界框数据 (缺少键 {e}): {bbox}")
+                    continue  # 跳过当前边界框，继续处理下一个
+                except (TypeError, ValueError) as e:
+                    print(f"警告: 跳过格式错误的边界框数据 (类型或值错误 {e}): {bbox}")
+                    continue  # 跳过当前边界框，继续处理下一个
+
+        # 所有掩膜绘制完成后，将 OpenCV 图像转换回 PIL 图像
+        # cv2 图像是 BGR 格式 (NumPy 数组)
+        # PIL 图像需要 RGB 格式
+        img_cv2_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(img_cv2_rgb)
+
+        return img_pil
 
     def _preprocess_apply_masks(self):
         """
-        迭代原始图像，应用掩膜，保存到 masked_image_root。
+        加载所有忽略数据，迭代原始图像，应用帧特定的掩膜，保存到 masked_image_root。
         如果成功完成所有处理，则创建 .masking_complete 标记文件。
         """
         if not os.path.exists(self.original_image_root):
-             raise FileNotFoundError(f"原始图像根目录未找到: {self.original_image_root}")
+            raise FileNotFoundError(f"原始图像根目录未找到: {self.original_image_root}")
+
+        # --- Step 1: 加载所有忽略边界框数据 ---
+        self.ignore_data_df = self._load_all_ignore_data()
 
         # 确保目标掩膜目录存在 (即使是空的)
         os.makedirs(self.masked_image_root, exist_ok=True)
 
-        video_folders = sorted([d for d in os.listdir(self.original_image_root) if os.path.isdir(os.path.join(self.original_image_root, d))])
+        video_folders = sorted([d for d in os.listdir(self.original_image_root) if
+                                os.path.isdir(os.path.join(self.original_image_root, d))])
         if not video_folders:
             print("警告: 原始图像目录中没有找到视频子文件夹。")
             # 即使没有视频，也应该创建标记文件表示“处理”完成（虽然是空处理）
@@ -192,77 +294,102 @@ class UAVDataLoaderBuilder:
                 print(f"  已创建标记文件 (空目录): {self.masking_complete_marker}")
             except OSError as e:
                 print(f"错误: 创建标记文件失败: {e}")
-            return # 没有可处理的内容
+            return  # 没有可处理的内容
 
         total_files_processed = 0
-        total_files_skipped = 0
+        total_files_skipped = 0  # 用于统计因文件名格式错误等原因跳过的文件
         errors_occurred = False
+        processed_videos_count = 0  # 统计实际处理了图像文件的视频文件夹数量
 
         for vid_folder_name in video_folders:
             original_vid_path = os.path.join(self.original_image_root, vid_folder_name)
             masked_vid_path = os.path.join(self.masked_image_root, vid_folder_name)
-            os.makedirs(masked_vid_path, exist_ok=True) # 创建目标视频目录
-
-            ignore_file = os.path.join(self.label_root, f"{vid_folder_name}_gt_ignore.txt")
-            ignore_file_exists = os.path.exists(ignore_file)
-            if not ignore_file_exists:
-                print(f"  警告: 视频 {vid_folder_name} 的忽略文件未找到: {ignore_file}。此视频中的图像将不会被掩膜，将复制原图。")
+            os.makedirs(masked_vid_path, exist_ok=True)  # 创建目标视频目录
 
             # print(f"  处理视频: {vid_folder_name}...")
             image_files = sorted(glob(os.path.join(original_vid_path, '*.jpg')))
             if not image_files:
                 # print(f"  警告: 视频 {vid_folder_name} 中未找到 .jpg 文件。")
-                continue # 处理下一个视频
+                continue  # 处理下一个视频
+
+            processed_videos_count += 1  # 确认这个视频文件夹有图像需要处理
+
+            # 检查这个视频是否有对应的忽略数据（可选，仅用于提示）
+            video_has_ignore_data = vid_folder_name in self.ignore_data_df[
+                'video_folder'].unique() if not self.ignore_data_df.empty else False
+            if not video_has_ignore_data:
+                print(f"  警告: 视频 {vid_folder_name} 在加载的忽略数据中没有对应条目。此视频中的图像将不会被掩膜。")
 
             for img_path in image_files:
                 base_name = os.path.basename(img_path)
                 masked_img_path = os.path.join(masked_vid_path, base_name)
 
-                # 如果目标文件已存在，可以跳过（可选，增加检查成本 vs 重复写入成本）
-                # if os.path.exists(masked_img_path):
-                #     total_files_skipped += 1
-                #     continue
+                # --- Step 2: 提取帧索引并查找对应的边界框 ---
+                try:
+                    # 提取文件名中的数字部分作为帧索引
+                    # 假设文件名格式为 'imgXXXXX.jpg'
+                    frame_index_str = base_name.replace('.jpg', '').replace('img', '')
+                    frame_index = int(frame_index_str)
+                except (ValueError, IndexError):
+                    print(f"警告: 无法从文件名 {base_name} 提取帧索引，跳过该文件的掩膜处理。")
+                    total_files_skipped += 1
+                    # 决定是否复制原图或跳过
+                    try:  # 尝试复制原图作为后备
+                        shutil.copy2(img_path, masked_img_path)
+                        # print(f"  -> 已复制原图到 {masked_img_path}") # 可选打印
+                    except Exception as copy_e:
+                        print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 失败: {copy_e}")
+                        errors_occurred = True  # 复制失败也算错误
+                    continue  # 跳过对该文件的掩膜处理
 
-                if ignore_file_exists:
-                    masked_img = self._apply_mask_to_image(img_path, ignore_file)
-                    if masked_img:
-                        try:
-                            masked_img.save(masked_img_path)
-                            total_files_processed += 1
-                        except Exception as e:
-                            print(f"错误: 保存掩膜图像 {masked_img_path} 失败: {e}")
-                            errors_occurred = True
-                    else:
-                        print(f"错误: 无法为 {img_path} 生成掩膜图像。")
+                # 从加载的 DataFrame 中筛选出当前视频和当前帧的边界框数据
+                # 如果 ignore_data_df 为空，或者找不到匹配项，这里将返回一个空的 DataFrame
+                current_frame_bboxes_df = self.ignore_data_df[
+                    (self.ignore_data_df['video_folder'] == vid_folder_name) &
+                    (self.ignore_data_df['frame_index'] == frame_index)
+                    ]
+
+                # 将筛选出的 DataFrame 行转换为 _apply_mask_to_image 需要的列表格式
+                # 如果 current_frame_bboxes_df 为空，to_dict('records') 将返回一个空列表 []
+                bboxes_list = current_frame_bboxes_df[['bbox_left', 'bbox_top', 'bbox_width', 'bbox_height']].rename(
+                    columns={
+                        'bbox_left': 'left', 'bbox_top': 'top', 'bbox_width': 'width', 'bbox_height': 'height'
+                    }).to_dict('records')  # 'records' 格式是一个字典列表
+
+                # --- Step 3: 应用掩膜 ---
+                # _apply_mask_to_image 方法会检查 bboxes_to_mask 是否为空，并据此决定是否应用掩膜
+                masked_img = self._apply_mask_to_image(img_path, bboxes_list)
+
+                if masked_img:
+                    try:
+                        masked_img.save(masked_img_path)
+                        total_files_processed += 1
+                    except Exception as e:
+                        print(f"错误: 保存掩膜图像 {masked_img_path} 失败: {e}")
                         errors_occurred = True
-                        # 决定是否复制原图或跳过
-                        try: # 尝试复制原图作为后备
-                           shutil.copy2(img_path, masked_img_path)
-                           print(f"  -> 已复制原图到 {masked_img_path}")
-                        except Exception as copy_e:
-                            print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 也失败: {copy_e}")
                 else:
-                    # 忽略文件不存在，复制原图
+                    # _apply_mask_to_image 返回 None 表示图像加载失败等严重问题
+                    print(f"错误: 无法为 {img_path} 生成掩膜图像 (加载失败或内部处理错误)。")
+                    errors_occurred = True
+                    # 决定是否复制原图作为后备
                     try:
                         shutil.copy2(img_path, masked_img_path)
-                        total_files_processed += 1 # 计为已处理（复制也是一种处理）
-                    except Exception as e:
-                         print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 失败: {e}")
-                         errors_occurred = True
+                        print(f"  -> 已复制原图到 {masked_img_path}")
+                    except Exception as copy_e:
+                        print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 也失败: {copy_e}")
+                        errors_occurred = True  # 复制失败也算错误
 
-        print(f"  掩膜处理统计: 处理/复制 {total_files_processed} 个文件, 跳过 {total_files_skipped} 个文件。")
+        print(f"\n掩膜处理完成。")
+        print(f"处理的视频文件夹数: {processed_videos_count}")
+        print(f"成功处理并保存的图像文件数: {total_files_processed}")
+        print(f"跳过掩膜处理的图像文件数 (文件名格式错误等): {total_files_skipped}")
 
-        # --- 创建标记文件 ---
-        if not errors_occurred:
-            try:
-                print(f"  所有文件处理完毕，未报告严重错误。正在创建标记文件: {self.masking_complete_marker}")
-                Path(self.masking_complete_marker).touch() # 创建空文件
-                print(f"  标记文件创建成功。")
-            except OSError as e:
-                print(f"错误: 创建标记文件 {self.masking_complete_marker} 失败: {e}")
-                # 即使标记失败，数据可能已生成，但下次仍会尝试重新生成
-        else:
-            print(f"警告: 掩膜处理过程中发生错误。标记文件 '{self.masking_complete_marker}' 将不会被创建。下次运行时将尝试重新生成掩膜数据。")
+        if errors_occurred:
+            print("警告: 处理过程中发生错误。请检查日志。")
+            # 根据需要决定是否创建标记文件。通常有错误时不创建，或者创建不同名称的标记文件。
+            # 这里我们选择即使有错误也创建标记文件，但前面的输出会提示错误。
+            pass  # 继续创建标记文件
+
 
     def apply_processing(self, dataset_path):
         """Applies haze or dehaze processing by calling external functions."""

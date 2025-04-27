@@ -2,15 +2,16 @@ import cv2
 import pandas as pd
 import os
 
+number = 210
 # 读取标签数据
-data = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0605_gt_whole.txt', header=None,
+data = pd.read_csv(f'data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0{number}_gt_whole.txt', header=None,
                    names=['frame_index', 'target_id', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height',
                           'out_of_view', 'occlusion', 'object_category'])
-data1 = pd.read_csv('data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0605_gt_ignore.txt', header=None,
+data1 = pd.read_csv(f'data/UAV-M/UAV-benchmark-MOTD_v1.0/GT/M0{number}_gt_ignore.txt', header=None,
                    names=['frame_index', 'target_id', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height',
                           'out_of_view', 'occlusion', 'object_category'])
 # 图像文件夹路径
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0605'
+image_folder = f'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0{number}'
 
 # 获取所有图像文件名并排序，确保按照文件名中的数字部分排序
 image_files = sorted(os.listdir(image_folder), key=lambda x: int(x.split('img')[1].split('.')[0]))
