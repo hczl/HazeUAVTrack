@@ -10,7 +10,7 @@ from utils.config import load_config
 
 
 
-def run_experiment(config_path):
+def run(config_path):
     # 1.导入设置
     cfg = load_config(config_path)
     os.makedirs(f"experiments/{cfg['experiment_name']}/results", exist_ok=True)
@@ -48,8 +48,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/exp1.yaml",
+        default="configs/exp2.yaml",
         help="配置文件路径（默认: configs/exp1.yaml）"
     )
     args = parser.parse_args()
-    run_experiment(args.config)
+    run(args.config)

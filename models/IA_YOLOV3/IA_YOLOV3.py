@@ -33,7 +33,6 @@ class IA_YOLOV3(nn.Module):
         print("Loading YOLOv3u model using ultralytics.YOLO...")
         # 使用 YOLO("yolov3u.pt") 加载模型。
         self.yolov3_wrapper = YOLO('yolov3.yaml').load('yolov3u.pt')
-        # self.yolov3_wrapper.load("yolov3u.pt")
         self.yolov3 = self.yolov3_wrapper.model  # 用 nn.Module 直接 forward
         ultralytics.utils.loss.v8DetectionLoss.__call__ = changeed__call__
         if torch.cuda.is_available():

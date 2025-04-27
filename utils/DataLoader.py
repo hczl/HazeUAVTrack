@@ -85,7 +85,7 @@ class UAVDataLoaderBuilder:
         self.original_image_root = os.path.join(self.root, config['dataset']['data_path'])
         self.label_root = os.path.join(self.root, config['dataset']['label_path'])
         self.masked_image_root = self.original_image_root + "_masked" # 掩膜图片的目录
-        self.masking_complete_marker = os.path.join(self.masked_image_root, ".masking_complete") # 掩膜完成标记文件
+        # self.masking_complete_marker = os.path.join(self.masked_image_root, ".masking_complete") # 掩膜完成标记文件
 
         random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -96,8 +96,8 @@ class UAVDataLoaderBuilder:
         if self.is_mask:
             print(f"配置要求进行掩膜处理。目标目录: '{self.masked_image_root}'")
             # 检查是否已完成
-            if os.path.exists(self.masking_complete_marker):
-                print(f"  发现标记文件 '{self.masking_complete_marker}'。跳过掩膜生成环节。")
+            if os.path.exists(self.masked_image_root):
+                print(f"  发现标记文件夹 '{self.masked_image_root}'。跳过掩膜生成环节。")
                 self.image_root = self.masked_image_root # 直接使用已存在的掩膜目录
             else:
                 print(f"  未发现标记文件或掩膜目录不完整。开始执行掩膜预处理...")
