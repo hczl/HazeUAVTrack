@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-def MiDaS_Deep(input_path):
+def MiDaS_Deep(input_path, fog_strength):
     input_path = Path(input_path)
     # print(input_path)
     dataset_name = input_path.name
@@ -26,7 +26,7 @@ def MiDaS_Deep(input_path):
     midas.to(device)
     midas.eval()
 
-    fog_strength = 1.0
+    fog_strength = fog_strength
     fog_color = np.array([200, 200, 200], dtype=np.uint8)
 
     subfolders = [f for f in os.listdir(input_path) if (input_path / f).is_dir()]

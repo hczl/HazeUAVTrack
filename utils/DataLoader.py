@@ -83,7 +83,7 @@ class UAVDataLoaderBuilder:
         self.dehaze_method = config.get('dehaze_method', "None")
         self.is_mask = config['dataset']['is_mask']
         self.is_clean = config['dataset']['is_clean']
-
+        self.fog_strength = config['dataset']['fog_strength']
         # 定义路径
         self.original_image_root = os.path.join(self.root, config['dataset']['data_path'])
         self.label_root = os.path.join(self.root, config['dataset']['label_path'])
@@ -414,10 +414,10 @@ class UAVDataLoaderBuilder:
             if not hasattr(module, method_name):
                  print(f"错误: 函数 '{method_name}' 在模块 '{module_name}' 中未找到。")
                  return input_path
-            func = getattr(module, method_name)
+            func = getattr(module, method_name,self.fog_strength)
 
             print(f"从 {module_prefix} 模块应用 {method_name} 处理到路径: {input_path}")
-            output_path = func(input_path)
+            output_path = func(input_path,self.fog_strength)
             if output_path is None:
                  print(f"警告: 处理函数 {module_name}.{method_name} 未返回路径。使用原始路径: {input_path}")
                  return input_path

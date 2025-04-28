@@ -431,7 +431,7 @@ class DE_NET(nn.Module):
         print(f"Epoch {epoch} 训练完成，平均 Loss: {avg_loss:.4f}")
         return avg_loss
 
-    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100, checkpoint_dir='./models/IA_YOLOV3/checkpoints'):
+    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100, checkpoint_dir='./models/DE_NET/checkpoints'):
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         best_loss = float('inf')
@@ -520,3 +520,12 @@ class DE_NET(nn.Module):
         self.config = checkpoint['config']
         print(f"检查点已加载，从 epoch {start_epoch} 继续训练 (如果需要)")
         return start_epoch
+
+    def predict(self, high_res_images):
+        self.enhancement.eval()
+        self.yolov3.eval()
+        high_res_images = high_res_images.to(self.device)
+        with torch.no_grad():
+            output = self.enhancement(high_res_images)
+            results = self.yolov3_wrapper.predict(output)
+        return results

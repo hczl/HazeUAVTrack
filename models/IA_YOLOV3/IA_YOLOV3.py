@@ -84,6 +84,7 @@ class IA_YOLOV3(nn.Module):
         torch.autograd.set_detect_anomaly(True)
         targets_dip, _ = clean_batch
         low_res_images, targets_yolov3 = tra_batch
+        # print(targets_yolov3)
         # print(type(targets_yolov3))
         low_res_images = low_res_images.to(self.device)
         targets_dip = targets_dip.to(self.device)

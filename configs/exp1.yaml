@@ -6,7 +6,7 @@ experiment_name: "exp1_dcp_yolov5_sort"
 # 生成雾方法，可选: None,MiDaS_Deep
 haze_method: "MiDaS_Deep"
 
-# 检测器，可选: IA_YOLOV3
+# 检测器，可选: IA_YOLOV3, DE_NET
 detector: "IA_YOLOV3"
 
 # 跟踪算法，可选: SORT
@@ -18,6 +18,7 @@ iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
+  fog_strength: 0.75
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 8
@@ -43,7 +44,7 @@ train:
   checkpoint_save_interval: 5
 
   # epochs
-  epochs: 1
+  epochs: 80
 
   # 是否从 checkpoint 恢复训练
   resume_training: false
