@@ -6,11 +6,10 @@ import numpy as np
 import torch
 from torch import optim
 
+# Assuming these imports are correct based on your code structure
 from utils.DataLoader import UAVDataLoaderBuilder
 from utils.common import create_model, create_data
 from utils.config import load_config
-
-
 
 # 1.导入设置
 cfg = load_config('configs/exp2.yaml')
@@ -18,90 +17,116 @@ os.makedirs(f"experiments/{cfg['experiment_name']}/results", exist_ok=True)
 
 # 3.模型创建
 model = create_model(cfg)
-# 4.模型训练
+
+# Load model weights
 # model.train_model(train_loader=train_loader, val_loader=val_loader, clean_loader=clean_loader, num_epochs=cfg['train']['epochs'])
 # model.load_state_dict(torch.load('models/IA_YOLOV3/checkpoints/checkpoint_epoch_80.pth'))
-model.load_checkpoint('models/DE_NET/checkpoints/checkpoint_epoch_30.pth')
+model.load_checkpoint('models/DE_NET/checkpoints/best_model.pth')
+
+# Set models to evaluation mode
 model.enhancement.eval()
 model.yolov3.eval()
+
 # Load the image
-image = cv2.imread('data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0101/img000002.jpg')
+image_path = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0101/img000002.jpg'
+image = cv2.imread(image_path)
 
 # 检查图片是否成功加载
 if image is None:
-    print("错误：无法加载图片。请检查路径是否正确。")
-    exit()  # 或者进行其他错误处理
+    print(f"错误：无法加载图片。请检查路径是否正确: {image_path}")
+    exit()
 
 # --- 图像缩放处理 ---
-# 获取原始图像尺寸
+# Get original image dimensions
 h_orig, w_orig = image.shape[:2]
 
 target_size = 1024
 
-# 计算缩放比例，基于长边
+# Calculate scale based on the longer side
 scale = target_size / max(h_orig, w_orig)
 
-# 计算按比例缩放后的中间尺寸
+# Calculate intermediate dimensions after scaling
 h_inter = int(h_orig * scale)
 w_inter = int(w_orig * scale)
 
-h_new = ((h_inter + 31) // 32) * 32
-w_new = ((w_inter + 31) // 32) * 32
+# Pad to a multiple of 32 (common for CNNs)
+# Calculate padding needed
+pad_w = (32 - (w_inter % 32)) % 32
+pad_h = (32 - (h_inter % 32)) % 32
 
-resized_image = cv2.resize(image, (w_new, h_new), interpolation=cv2.INTER_CUBIC)
-# --- 缩放处理结束 ---
+# New dimensions after padding
+w_new = w_inter + pad_w
+h_new = h_inter + pad_h
 
-# 继续你的后续处理步骤，使用 resized_image
-input_image1 = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
+# Resize the image
+# Note: OpenCV resize expects (width, height)
+resized_image = cv2.resize(image, (w_inter, h_inter), interpolation=cv2.INTER_LINEAR) # Use INTER_LINEAR or INTER_AREA for downsampling
 
-# 转换为 float 并归一化到 [0, 1]
-input_image = input_image1.astype(np.float32) / 255.0
+# Pad the image
+# Note: OpenCV pad expects (top, bottom, left, right)
+padded_image = cv2.copyMakeBorder(resized_image, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=(114, 114, 114)) # Pad with gray color
 
-input_image = torch.from_numpy(input_image).permute(2, 0, 1).unsqueeze(0).float().to('cuda')
-# 模型推理
+# Store the original image for later plotting (optional, but good practice)
+# annotated_image = image.copy() # If you want to draw on the original size
+
+# --- 缩放和填充处理结束 ---
+
+
+# Convert BGR to RGB (for model input)
+input_image_rgb = cv2.cvtColor(padded_image, cv2.COLOR_BGR2RGB)
+
+# Convert to float and normalize to [0, 1]
+input_tensor_np = input_image_rgb.astype(np.float32) / 255.0
+
+# Convert numpy array to torch tensor, change shape (H, W, C) to (C, H, W), add batch dimension
+input_tensor = torch.from_numpy(input_tensor_np).permute(2, 0, 1).unsqueeze(0).float().to('cuda')
+
+# Model Inference
 with torch.no_grad():
-    results = model.predict(input_image)
-# 假设 results 是 model.predict(source) 的输出
+    # Pass the tensor to the predict method
+    # Note: Some predict methods can also take the original image path/array directly
+    # If your model's predict method expects the original image for plotting, you might need to adjust
+    # However, the ultralytics Results object usually handles this if the input is a tensor.
+    results = model.predict(input_tensor)
 
-# 检查 results 是否是列表 (通常是)
-if isinstance(results, list):
-    # 遍历列表中的每一个结果对象
-    for i, result in enumerate(results):
-        # 现在 result 是一个单独的 ultralytics.engine.results.Results 对象
-        # 它拥有 plot() 方法
-        boxes = result.boxes
-        print(boxes)
-        # 现在你可以处理这个 annotated_image (NumPy 数组)
-        # 例如，使用 OpenCV 显示或保存
-        import cv2
+# Assume results is a list containing one Results object for the single image
+if results:
+    # Get the first (and likely only) Results object
+    result = results[0]
 
-        # x, y, w, h = int(row['bbox_left']), int(row['bbox_top']), int(row['bbox_width']), int(row['bbox_height'])
+    # Print box information (optional, for verification)
+    print("Boxes (xywh):", result.boxes.xywh.shape)
+    # print("Boxes (xywhn):", result.boxes.xywhn)
+    # print("Boxes (xyxy):", result.boxes.xyxy)
+    # print("Boxes (xyxyn):", result.boxes.xyxyn)
+    # print("Confidence:", result.boxes.conf)
+    # print("Class IDs:", result.boxes.cls)
 
-        # # 获取目标ID作为标签
-        # label = f"ID: {row['target_id']}"
-        #
-        # # 绘制边界框
-        # cv2.rectangle(input_image1, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 使用绿色框
-        #
-        # # 在左上角添加标签
-        # cv2.putText(input_image1, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # --- Get the annotated image ---
+    # The plot() method draws the boxes, labels, etc., onto the image used for inference
+    # It returns a NumPy array suitable for OpenCV (BGR format, uint8)
+    # annotated_image = result.plot()
 
-        # 保存图像 (可选)
-        output_filename = f"image_with_boxes_{i}.jpg"
-        cv2.imwrite(output_filename, input_image1)
-        print(f"Saved annotated image to {output_filename}")
+    # --- Display the annotated image ---
+    # cv2.imshow("Annotated Image", annotated_image)
 
-        # 或者使用 result 对象自带的 save() 方法保存
-        # 它会保存到 results.save_dir 目录下
-        result.save()
-        print(f"Saved annotated image for item {i} to {result.save_dir}")
+    # Wait indefinitely until a key is pressed
+    # cv2.waitKey(0)
+
+    # Close all OpenCV windows
+    # cv2.destroyAllWindows()
+
+    # # --- Save the annotated image (Optional) ---
+    # output_filename = "annotated_image_with_detections.jpg"
+    # cv2.imwrite(output_filename, annotated_image)
+    # print(f"Saved annotated image to {output_filename}")
+
+    # --- Alternative: Use the built-in save method ---
+    # This saves the annotated image to the default run directory (e.g., runs/detect/predictX)
+    # result.save()
+    # print(f"Saved annotated image using result.save() to {result.save_dir}")
 
 else:
-    # 如果 predict 返回的是单个 Results 对象 (较少见，但为代码健壮性考虑)
-    # 虽然根据错误，你的情况不是这样
-    annotated_image = results.plot()
-    # 处理这个单独的 annotated_image
-    # ... 显示或保存 ...
-    results.save()
-    print(f"Saved single annotated image to {results.save_dir}")
+    print("No results obtained from prediction.")
 
+print("Script finished.")

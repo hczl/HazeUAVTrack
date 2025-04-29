@@ -397,11 +397,46 @@ class DE_NET(nn.Module):
         self.optimizer.zero_grad()
         torch.autograd.set_detect_anomaly(True)
 
-        low_res_images, targets_yolov3 = tra_batch
+        low_res_images, targets_yolov3, processed_ignore_list = tra_batch
         # print(type(targets_yolov3))
         low_res_images = low_res_images.to(self.device)
+        targets_yolov3["batch_idx"] = targets_yolov3["batch_idx"].to(self.device)
+        targets_yolov3["cls"] = targets_yolov3["cls"].to(self.device)
+        targets_yolov3["bboxes"] = targets_yolov3["bboxes"].to(self.device)
+        combined_ignore_boxes_list = []
+        if processed_ignore_list is not None:
+            for i, ignore_boxes_for_image in enumerate(processed_ignore_list):
+                # ignore_boxes_for_image is expected to be [num_ignore_i, 5] with [class_id, x_c, y_c, w, h] normalized
+                if ignore_boxes_for_image.numel() > 0:
+                    # Create batch index column (float type to match other tensors)
+                    batch_idx_tensor = torch.full((ignore_boxes_for_image.shape[0], 1), i, dtype=torch.float32,
+                                                  device=self.device)
+                    # Concatenate batch_idx column with the ignore box tensor
+                    # Resulting format: [batch_idx, class_id, x_c, y_c, w, h]
+                    combined_row = torch.cat([batch_idx_tensor, ignore_boxes_for_image.to(self.device)], dim=1)
+                    combined_ignore_boxes_list.append(combined_row)
+
+        # Concatenate all ignore boxes into a single tensor for the batch
+        if len(combined_ignore_boxes_list) > 0:
+            final_ignored_bboxes_tensor = torch.cat(combined_ignore_boxes_list, dim=0)
+            # Add this tensor to the targets dictionary under a specific key.
+            # The YOLO loss function (specifically, the assigner within it)
+            # must be modified elsewhere to recognize and use this key
+            # (e.g., "ignored_bboxes") to mark predictions within these
+            # regions as 'ignore' rather than positive or negative.
+            targets_yolov3["ignored_bboxes"] = final_ignored_bboxes_tensor
+        else:
+            # Add an empty tensor if no ignore boxes exist in the batch
+            # Ensure the shape matches the expected format [N, 6]
+            targets_yolov3["ignored_bboxes"] = torch.empty(0, 6, dtype=torch.float32,
+                                                           device=self.device)  # Expected format: [batch_idx, cls, x, y, w, h]
+        # --- End of ignore target processing ---
+
+        # --- Training steps ---
+        self.optimizer.zero_grad()
 
         output = self(low_res_images)
+
         loss_tuple = self.yolov3_wrapper.loss(targets_yolov3, output)
         loss = sum([t.sum() for t in loss_tuple])
 
@@ -413,7 +448,7 @@ class DE_NET(nn.Module):
 
     def train_epoch(self, train_loader, epoch):
         epoch_loss = 0.0
-        train_loader, _ = process_and_return_loaders(train_loader)
+        train_loader= process_and_return_loaders(train_loader)
         pbar = tqdm(train_loader, total=self.train_batch_nums, desc=f"Epoch {epoch}")
         for batch_idx, tra_batch in enumerate(pbar):
             loss = self.train_step(tra_batch)
@@ -436,8 +471,8 @@ class DE_NET(nn.Module):
 
         best_loss = float('inf')
         # 训练前预处理
-        _, self.train_batch_nums= process_and_return_loaders(train_loader)
-        _, self.val_batch_nums = process_and_return_loaders(val_loader)
+        self.train_batch_nums = len(train_loader)
+        self.val_batch_nums = len(val_loader)
         if self.config['train']['resume_training']:
             print("==> 尝试加载最近 checkpoint ...")
             checkpoint_path = os.path.join(checkpoint_dir, 'best_model.pth')
@@ -473,15 +508,44 @@ class DE_NET(nn.Module):
 
     def evaluate(self, val_loader):
         total_loss = 0.0
-        val_loader, _ = process_and_return_loaders(val_loader)
+        val_loader= process_and_return_loaders(val_loader)
         with torch.no_grad():
             pbar = tqdm(val_loader, total=self.val_batch_nums, desc=f"Val")
             for batch_idx, val_batch in enumerate(pbar):
-                # 获取输入和标签
-                low_res_images, targets_yolov3 = val_batch
-
-                # 移动到设备
+                low_res_images, targets_yolov3, processed_ignore_list = val_batch
+                # print(type(targets_yolov3))
                 low_res_images = low_res_images.to(self.device)
+                targets_yolov3["batch_idx"] = targets_yolov3["batch_idx"].to(self.device)
+                targets_yolov3["cls"] = targets_yolov3["cls"].to(self.device)
+                targets_yolov3["bboxes"] = targets_yolov3["bboxes"].to(self.device)
+                combined_ignore_boxes_list = []
+                if processed_ignore_list is not None:
+                    for i, ignore_boxes_for_image in enumerate(processed_ignore_list):
+                        # ignore_boxes_for_image is expected to be [num_ignore_i, 5] with [class_id, x_c, y_c, w, h] normalized
+                        if ignore_boxes_for_image.numel() > 0:
+                            # Create batch index column (float type to match other tensors)
+                            batch_idx_tensor = torch.full((ignore_boxes_for_image.shape[0], 1), i, dtype=torch.float32,
+                                                          device=self.device)
+                            # Concatenate batch_idx column with the ignore box tensor
+                            # Resulting format: [batch_idx, class_id, x_c, y_c, w, h]
+                            combined_row = torch.cat([batch_idx_tensor, ignore_boxes_for_image.to(self.device)], dim=1)
+                            combined_ignore_boxes_list.append(combined_row)
+
+                # Concatenate all ignore boxes into a single tensor for the batch
+                if len(combined_ignore_boxes_list) > 0:
+                    final_ignored_bboxes_tensor = torch.cat(combined_ignore_boxes_list, dim=0)
+                    # Add this tensor to the targets dictionary under a specific key.
+                    # The YOLO loss function (specifically, the assigner within it)
+                    # must be modified elsewhere to recognize and use this key
+                    # (e.g., "ignored_bboxes") to mark predictions within these
+                    # regions as 'ignore' rather than positive or negative.
+                    targets_yolov3["ignored_bboxes"] = final_ignored_bboxes_tensor
+                else:
+                    # Add an empty tensor if no ignore boxes exist in the batch
+                    # Ensure the shape matches the expected format [N, 6]
+                    targets_yolov3["ignored_bboxes"] = torch.empty(0, 6, dtype=torch.float32,
+                                                                   device=self.device)  # Expected format: [batch_idx, cls, x, y, w, h]
+                # --- End of ignore target processing ---
 
                 # YOLO前向
                 output = self(low_res_images)

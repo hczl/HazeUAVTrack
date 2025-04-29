@@ -1,6 +1,5 @@
 import os
 import sys
-
 import cv2
 import pandas as pd
 import torch
@@ -11,28 +10,58 @@ from glob import glob
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image, ImageDraw
 import shutil
-import time # 用于计时
+import time
 from pathlib import Path # 更方便地处理路径和创建空文件
+import re # 用于从文件名提取帧号
+import traceback # 用于打印完整的错误堆栈
 
-# custom_collate_fn 和 UAVOriginalDataset 保持不变 (从之前的回答复制)
+# custom_collate_fn 需要修改以处理潜在的第三个返回值，并期望 ignore 和 label 格式一致
 def custom_collate_fn(batch):
     """
-    Custom collate function to handle batches of images and variable-length label lists.
+    Custom collate function to handle batches of images, variable-length label lists,
+    and optional variable-length ignore lists.
+    Expects labels and ignores (if present) to have the same annotation format length.
     """
-    images, labels = zip(*batch)
-    images = torch.stack(images, dim=0)
-    labels = [torch.tensor(label, dtype=torch.float32) if label else torch.empty((0, 9), dtype=torch.float32) for label in labels]
-    return images, labels
+    # 检查批次中的第一个样本是否包含忽略数据 (长度是 3)
+    has_ignores = len(batch[0]) == 3
 
+    if has_ignores:
+        images, labels, ignores = zip(*batch)
+    else:
+        images, labels = zip(*batch)
+        ignores = None # 或者可以创建一个空的ignores列表
+
+    # 堆叠图像
+    images = torch.stack(images, dim=0)
+
+    # 处理标签列表
+    # 假设标签格式有 9 个字段 (frame_index, target_id, bbox_left, ..., object_category)
+    # 使用一个示例的空标签形状 (0, 9)
+    label_format_size = 9 # 根据您的实际标签格式字段数量调整这里
+    labels = [torch.tensor(label, dtype=torch.float32) if label else torch.empty((0, label_format_size), dtype=torch.float32) for label in labels]
+
+    # 处理忽略列表 (如果存在)
+    if has_ignores and ignores is not None:
+        # 忽略边界框格式与标签格式一致，也假设有 9 个字段
+        ignore_format_size = 9 # 根据您的实际忽略标签格式字段数量调整这里
+        ignores = [torch.tensor(ignore, dtype=torch.float32) if ignore else torch.empty((0, ignore_format_size), dtype=torch.float32) for ignore in ignores]
+        return images, labels, ignores
+    else:
+        return images, labels
+
+# UAVOriginalDataset 需要修改以接收 is_mask 参数和读取忽略文件 (现在格式与标签文件相同)
 class UAVOriginalDataset(Dataset):
     """
     Dataset class for loading UAV image frames (original or pre-masked) and annotations.
+    Optionally loads and returns ignore region annotations based on is_mask flag.
+    Labels and Ignore annotations are expected to be in the same format.
     """
-    def __init__(self, image_files, label_files, ignore_files, transform=None):
+    def __init__(self, image_files, label_files, ignore_files, transform=None, is_mask=False):
         self.image_files = image_files
         self.label_files = label_files
-        self.ignore_files = ignore_files
+        self.ignore_files = ignore_files # 存储帧级忽略文件路径
         self.transform = transform
+        self.is_mask = is_mask # 控制是否加载和返回忽略信息
 
     def __len__(self):
         return len(self.image_files)
@@ -44,34 +73,75 @@ class UAVOriginalDataset(Dataset):
         except FileNotFoundError:
             print(f"错误: 图像文件未找到: {img_path}")
             img = Image.new('RGB', (224, 224), color='black') # 返回一个黑色图像作为替代
+        except Exception as e:
+             print(f"错误: 加载图像文件失败 {img_path}: {e}")
+             img = Image.new('RGB', (224, 224), color='black') # 返回一个黑色图像作为替代
 
+        # --- 加载主标签 ---
         label_path = self.label_files[idx]
         annotations = []
         if os.path.exists(label_path):
             with open(label_path, 'r') as f:
                 for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'): continue # 跳过空行或注释
                     try:
-                        fields = list(map(float, line.strip().split(',')))
-                        if len(fields) < 9:
-                            # print(f"警告: 跳过标签文件中格式不正确的行 {label_path}: {line.strip()}")
-                            continue
+                        # 假设标签格式是 frame_index, target_id, x, y, w, h, out-of-view, occlusion, category, ...
+                        fields = list(map(float, line.split(',')))
+                        # 可以选择在这里对字段数量进行更严格的检查，但为了兼容性，只要求至少有必要的字段
+                        # if len(fields) < 9:
+                        #     print(f"警告: 标签文件 {label_path} 中行格式不正确 (字段不足): {line}")
+                        #     continue
                         annotations.append(fields)
                     except ValueError:
-                        # print(f"警告: 跳过标签文件中的无效数字数据 {label_path}: {line.strip()}")
-                        continue
+                        # print(f"警告: 标签文件 {label_path} 中行包含非数字值: {line}")
+                        pass # 跳过包含非数字的行
+                    except IndexError:
+                         # print(f"警告: 标签文件 {label_path} 中行格式不正确 (索引错误): {line}")
+                         pass # 跳过索引错误的行
+
+        # --- 加载忽略标签 (如果 is_mask 为 True) ---
+        ignore_annotations = []
+        if self.is_mask:
+            ignore_path = self.ignore_files[idx]
+            if os.path.exists(ignore_path):
+                with open(ignore_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'): continue # 跳过空行或注释
+                        try:
+                            # 忽略标签格式与主标签格式一致
+                            fields = list(map(float, line.split(',')))
+                            # 同样可以检查字段数量
+                            # if len(fields) < 9:
+                            #     print(f"警告: 忽略文件 {ignore_path} 中行格式不正确 (字段不足): {line}")
+                            #     continue
+                            ignore_annotations.append(fields)
+                        except ValueError:
+                            # print(f"警告: 忽略文件 {ignore_path} 中行包含非数字值: {line}")
+                            pass # 跳过包含非数字的行
+                        except IndexError:
+                             # print(f"警告: 忽略文件 {ignore_path} 中行格式不正确 (索引错误): {line}")
+                             pass # 跳过索引错误的行
+            # else:
+            #      print(f"警告: 忽略文件未找到 (is_mask=True): {ignore_path}") # 可能会有很多，酌情开启
 
         if self.transform:
             img = self.transform(img)
 
-        return img, annotations
+        # 根据 is_mask 返回不同的结果
+        if self.is_mask:
+            return img, annotations, ignore_annotations
+        else:
+            return img, annotations
 
 
+# UAVDataLoaderBuilder 需要修改以加载所有忽略数据并生成帧级忽略文件 (格式与标签相同)
 class UAVDataLoaderBuilder:
     """
-    构建 UAV 数据集的 DataLoaders，处理数据分割、可选的掩膜预处理、
+    构建 UAV 数据集的 DataLoaders，处理数据分割、可选的掩膜预处理（生成帧级忽略文件）、
     可选的雾化/去雾处理以及标签提取。
-    如果启用掩膜，它会预先创建掩膜图像并保存到单独目录。
-    如果掩膜目录和完成标记已存在，则跳过掩膜生成。
+    现在会为每一帧创建其对应的 ignore 标签文件，格式与主标签文件一致。
     """
     def __init__(self, config):
         """
@@ -81,80 +151,60 @@ class UAVDataLoaderBuilder:
         self.root = config['dataset']['path']
         self.haze_method = config.get('haze_method', "None")
         self.dehaze_method = config.get('dehaze_method', "None")
-        self.is_mask = config['dataset']['is_mask']
-        self.is_clean = config['dataset']['is_clean']
-        self.fog_strength = config['dataset']['fog_strength']
+        self.is_mask = config['dataset']['is_mask'] # 保留这个配置，用于控制是否加载和返回忽略信息
+        self.is_clean = config['dataset'].get('is_clean', False) # 默认为 False
+        self.fog_strength = config['dataset'].get('fog_strength', 0.5) # 默认为 0.5
+
         # 定义路径
         self.original_image_root = os.path.join(self.root, config['dataset']['data_path'])
         self.label_root = os.path.join(self.root, config['dataset']['label_path'])
-        self.masked_image_root = self.original_image_root + "_masked" # 掩膜图片的目录
-        # self.masking_complete_marker = os.path.join(self.masked_image_root, ".masking_complete") # 掩膜完成标记文件
 
         random.seed(self.seed)
         torch.manual_seed(self.seed)
 
+        print(f"初始化 DataLoader Builder...")
+        print(f"  原始图像根目录: {self.original_image_root}")
+        print(f"  标签根目录: {self.label_root}")
+        print(f"  是否加载忽略信息 (is_mask): {self.is_mask}")
+        print(f"  雾化方法: {self.haze_method}, 去雾方法: {self.dehaze_method}, 雾强度: {self.fog_strength}")
+
+        # --- 加载所有忽略边界框数据到帧级映射 ---
+        # 这段数据用于后续生成帧级忽略文件，现在存储原始行字符串
+        self.all_frame_ignores_map = self._parse_all_ignore_to_frames()
+        print(f"  从 _gt_ignore.txt 文件加载了忽略数据映射。")
+
+
+        # --- 应用雾化/去雾处理 ---
+        # image_root 现在是经过处理后的图像目录
         self.image_root = self.apply_processing(self.original_image_root)
-        print(f"应用雾化/去雾处理后的最终图像根目录: {self.image_root}")
-        # --- 掩膜预处理 (检查与执行) ---
-        if self.is_mask:
-            print(f"配置要求进行掩膜处理。目标目录: '{self.masked_image_root}'")
-            # 检查是否已完成
-            if os.path.exists(self.masked_image_root):
-                print(f"  发现标记文件夹 '{self.masked_image_root}'。跳过掩膜生成环节。")
-                self.image_root = self.masked_image_root # 直接使用已存在的掩膜目录
-            else:
-                print(f"  未发现标记文件或掩膜目录不完整。开始执行掩膜预处理...")
-                start_time = time.time()
-                try:
-                    self._preprocess_apply_masks()
-                    # 只有在 _preprocess_apply_masks 成功完成后才设置标记
-                    # (该方法内部会创建标记文件)
-                    end_time = time.time()
-                    print(f"  掩膜预处理完成。耗时: {end_time - start_time:.2f} 秒。")
-                    self.image_root = self.masked_image_root # 使用新生成的掩膜目录
-                except Exception as e:
-                    print(f"错误: 掩膜预处理失败: {e}")
-                    print("将尝试使用原始图像，但这可能不是预期行为。")
-                    # 出错时回退到原始图像路径
-                    self.image_root = self.original_image_root
-                    # 可选：如果出错，删除可能不完整的掩膜目录
-                    # if os.path.exists(self.masked_image_root):
-                    #     print(f"  正在删除可能不完整的掩膜目录: {self.masked_image_root}")
-                    #     shutil.rmtree(self.masked_image_root)
-        else:
-            # 不进行掩膜处理，使用原始图像
-            print("配置未要求进行掩膜处理。使用原始图像。")
-            self.image_root = self.original_image_root
+        print(f"  经过处理后的最终图像根目录: {self.image_root}")
 
-        print(f"最终用于数据集构建的图像根目录: {self.image_root}")
 
-    def _load_all_ignore_data(self):
+    def _parse_all_ignore_to_frames(self):
         """
-        加载所有 _gt_ignore.txt 文件中的忽略边界框数据到 pandas DataFrame。
-        假设文件格式为: frame_index, ..., bbox_left, bbox_top, bbox_width, bbox_height, ...
+        加载所有 _gt_ignore.txt 文件，并将忽略边界框数据按视频和帧索引存储到字典中。
+        存储原始的行字符串，以便后续直接写入帧级文件。
+        实际文件格式为:
+        <frame_index>,<target_id>,<bbox_left>,<bbox_top>,<bbox_width>,<bbox_height>,<out-of-view>,<occlusion>,<object_category>,...
         """
-        print(f"正在从 {self.label_root} 加载忽略边界框数据...")
-        all_data = []
+        print(f"正在从 {self.label_root} 解析所有 _gt_ignore.txt 数据到帧映射...")
+        # 字典结构: {(video_folder, frame_index): [line1, line2, ...]}
+        frame_ignore_map = {}
 
         if not os.path.exists(self.label_root):
-            print(f"警告: 标签根目录未找到: {self.label_root}。将不会应用任何掩膜。")
-            # 返回一个空的 DataFrame，确保后续处理不会出错
-            return pd.DataFrame(
-                columns=['video_folder', 'frame_index', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height'])
+            print(f"警告: 标签根目录未找到: {self.label_root}。将不会加载忽略数据。")
+            return frame_ignore_map
 
-        # 遍历 label_root 下的所有文件，查找 _gt_ignore.txt
-        # 假设文件名格式是 {video_folder_name}_gt_ignore.txt
-        # 需要获取所有视频文件夹的名称，以便匹配忽略文件
-        # 可以从 original_image_root 获取视频文件夹列表
-        video_folders_to_process = sorted([d for d in os.listdir(self.original_image_root) if
-                                           os.path.isdir(os.path.join(self.original_image_root, d))])
+        ignore_files_list = glob(os.path.join(self.label_root, '*_gt_ignore.txt'))
 
-        for vid_folder_name in video_folders_to_process:
-            ignore_file_path = os.path.join(self.label_root, f"{vid_folder_name}_gt_ignore.txt")
+        if not ignore_files_list:
+             print(f"警告: 在 {self.label_root} 中未找到任何 *_gt_ignore.txt 文件。将不会加载忽略数据。")
+             return frame_ignore_map
 
-            if not os.path.exists(ignore_file_path):
-                # print(f"  忽略文件未找到，跳过加载 {ignore_file_path}") # 可以在这里打印每个缺失文件的警告
-                continue  # 跳过这个视频文件夹对应的忽略文件加载
+        for ignore_file_path in ignore_files_list:
+            file_name = os.path.basename(ignore_file_path)
+            vid_folder_name = file_name.replace('_gt_ignore.txt', '')
+            # print(f"  正在解析忽略文件: {ignore_file_path} (对应视频: {vid_folder_name})")
 
             try:
                 with open(ignore_file_path, 'r') as f:
@@ -163,232 +213,36 @@ class UAVDataLoaderBuilder:
                         if not line or line.startswith('#'):  # 跳过空行或注释行
                             continue
                         parts = line.split(',')
-                        # 根据原始 _apply_mask_to_image 中的解析逻辑，需要至少9个部分
-                        # 但实际只需要 frame_index (parts[0]) 和 bbox (parts[2]到parts[5])
-                        # 如果确定格式是 frame_index, ..., bbox_left, bbox_top, bbox_width, bbox_height, ...
-                        # 那么只需要检查是否有足够的元素来提取需要的字段
-                        if len(parts) >= 6:  # 需要 frame_index (0), bbox_left (2), bbox_top (3), bbox_width (4), bbox_height (5)
+                        # 至少需要 frame_index (parts[0])
+                        if len(parts) >= 1:
                             try:
-                                # 假设 frame_index 是第一个元素 (parts[0])
-                                frame_index = int(float(parts[0]))  # 使用 float 转换以处理可能的浮点数
-                                bbox_left = int(float(parts[2]))  # 使用 float 转换以处理可能的浮点数
-                                bbox_top = int(float(parts[3]))
-                                bbox_width = int(float(parts[4]))
-                                bbox_height = int(float(parts[5]))
+                                # frame_index 是第一个元素 (parts[0])
+                                frame_index = int(float(parts[0])) # 使用float转换以处理可能的浮点数帧索引
+                                # 将原始行添加到映射中
+                                key = (vid_folder_name, frame_index)
+                                if key not in frame_ignore_map:
+                                    frame_ignore_map[key] = []
+                                frame_ignore_map[key].append(line) # 存储原始行
 
-                                all_data.append({
-                                    'video_folder': vid_folder_name,  # 记录来自哪个视频文件夹
-                                    'frame_index': frame_index,
-                                    'bbox_left': bbox_left,
-                                    'bbox_top': bbox_top,
-                                    'bbox_width': bbox_width,
-                                    'bbox_height': bbox_height
-                                })
                             except ValueError:
-                                print(
-                                    f"警告: 跳过忽略文件 {ignore_file_path} 中格式错误的行 (非数字值) {line_num}: {line}")
-                            except IndexError:  # 理论上 len(parts) >= 6 应该避免 IndexErrors for 0,2,3,4,5, but good practice
-                                print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
+                                # print(f"警告: 跳过忽略文件 {ignore_file_path} 中格式错误的行 (非数字帧索引) {line_num}: {line}")
+                                pass # 跳过包含非数字帧索引的行
+                            except IndexError:
+                                # This should theoretically not happen if len(parts) >= 1, but kept for robustness
+                                # print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
+                                pass # 跳过列数不足的行
 
                         else:
-                            print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
-
+                            # print(f"警告: 跳过忽略文件 {ignore_file_path} 中列数不足的行 {line_num}: {line}")
+                            pass # 跳过列数不足的行 (少于1列，虽然不太可能)
 
             except Exception as e:
                 print(f"错误: 读取或解析忽略文件 {ignore_file_path} 失败: {e}")
-                # 可以在这里决定是否中断或继续处理其他文件
+                traceback.print_exc() # 打印更详细的错误信息
+                # 继续处理其他文件
 
-        if not all_data:
-            print("警告: 未从任何忽略文件中加载到有效的边界框数据。所有图像将不会被掩膜。")
-            # 返回一个空的 DataFrame
-            return pd.DataFrame(
-                columns=['video_folder', 'frame_index', 'bbox_left', 'bbox_top', 'bbox_width', 'bbox_height'])
-
-        df = pd.DataFrame(all_data)
-        # 可以选择在这里对 DataFrame 进行排序或索引，以便更快查询，例如按 video_folder 和 frame_index
-        # df = df.sort_values(by=['video_folder', 'frame_index']).set_index(['video_folder', 'frame_index']) # 设置索引可以加速查询，但会改变结构
-        # 简单的过滤查询通常也足够快
-        print(f"成功加载 {len(df)} 条忽略边界框数据。")
-        return df
-
-    # 修改 _apply_mask_to_image 方法，接受边界框列表
-    def _apply_mask_to_image(self, image_path, bboxes_to_mask):
-        """加载图像，根据提供的边界框列表应用掩膜，返回掩膜后的 PIL 图像。
-           内部使用 OpenCV 进行图像处理和绘制。
-           bboxes_to_mask: 一个列表，每个元素是一个字典，例如:
-           [{'left': l1, 'top': t1, 'width': w1, 'height': h1},
-            {'left': l2, 'top': t2, 'width': w2, 'height': h2}, ...]
-           如果列表为空，则不应用任何掩膜。
-        """
-        # 使用 OpenCV 读取图像
-        # cv2.imread 默认读取为 BGR 格式
-        img_cv2 = cv2.imread(image_path)
-
-        # 检查图像是否成功加载
-        if img_cv2 is None:
-            print(f"错误: 掩膜处理时图像文件未找到或无法加载: {image_path}")
-            return None
-
-        # 获取图像尺寸 (OpenCV 格式是 高度, 宽度, 通道数)
-        img_height, img_width = img_cv2.shape[:2]
-
-        # 如果提供了边界框列表，则应用掩膜
-        if bboxes_to_mask:
-            # 遍历需要应用的边界框列表
-            for bbox in bboxes_to_mask:
-                try:
-                    # 从字典中提取边界框坐标和尺寸
-                    bbox_left = int(bbox['left'])
-                    bbox_top = int(bbox['top'])
-                    bbox_width = int(bbox['width'])
-                    bbox_height = int(bbox['height'])
-
-                    # 计算边界框的对角坐标 (x1, y1) 和 (x2, y2)
-                    # 并钳制到图像边界内
-                    x1 = max(0, min(img_width - 1, bbox_left))
-                    y1 = max(0, min(img_height - 1, bbox_top))
-                    x2 = max(0, min(img_width - 1, bbox_left + bbox_width))
-                    y2 = max(0, min(img_height - 1, bbox_top + bbox_height))
-
-                    # 在 OpenCV 图像上绘制填充的矩形作为掩膜
-                    # 颜色 (128, 128, 128) 是灰色，-1 表示填充整个矩形
-                    # 如果想用黑色，可以改为 (0, 0, 0)
-                    cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (128, 128, 128), -1)  # 使用原始代码的灰色
-
-                except KeyError as e:
-                    print(f"警告: 跳过格式错误的边界框数据 (缺少键 {e}): {bbox}")
-                    continue  # 跳过当前边界框，继续处理下一个
-                except (TypeError, ValueError) as e:
-                    print(f"警告: 跳过格式错误的边界框数据 (类型或值错误 {e}): {bbox}")
-                    continue  # 跳过当前边界框，继续处理下一个
-
-        # 所有掩膜绘制完成后，将 OpenCV 图像转换回 PIL 图像
-        # cv2 图像是 BGR 格式 (NumPy 数组)
-        # PIL 图像需要 RGB 格式
-        img_cv2_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
-        img_pil = Image.fromarray(img_cv2_rgb)
-
-        return img_pil
-
-    def _preprocess_apply_masks(self):
-        """
-        加载所有忽略数据，迭代原始图像，应用帧特定的掩膜，保存到 masked_image_root。
-        如果成功完成所有处理，则创建 .masking_complete 标记文件。
-        """
-        if not os.path.exists(self.original_image_root):
-            raise FileNotFoundError(f"原始图像根目录未找到: {self.original_image_root}")
-
-        # --- Step 1: 加载所有忽略边界框数据 ---
-        self.ignore_data_df = self._load_all_ignore_data()
-
-        # 确保目标掩膜目录存在 (即使是空的)
-        os.makedirs(self.masked_image_root, exist_ok=True)
-
-        video_folders = sorted([d for d in os.listdir(self.original_image_root) if
-                                os.path.isdir(os.path.join(self.original_image_root, d))])
-        if not video_folders:
-            print("警告: 原始图像目录中没有找到视频子文件夹。")
-            # 即使没有视频，也应该创建标记文件表示“处理”完成（虽然是空处理）
-            try:
-                Path(self.masking_complete_marker).touch()
-                print(f"  已创建标记文件 (空目录): {self.masking_complete_marker}")
-            except OSError as e:
-                print(f"错误: 创建标记文件失败: {e}")
-            return  # 没有可处理的内容
-
-        total_files_processed = 0
-        total_files_skipped = 0  # 用于统计因文件名格式错误等原因跳过的文件
-        errors_occurred = False
-        processed_videos_count = 0  # 统计实际处理了图像文件的视频文件夹数量
-
-        for vid_folder_name in video_folders:
-            original_vid_path = os.path.join(self.original_image_root, vid_folder_name)
-            masked_vid_path = os.path.join(self.masked_image_root, vid_folder_name)
-            os.makedirs(masked_vid_path, exist_ok=True)  # 创建目标视频目录
-
-            # print(f"  处理视频: {vid_folder_name}...")
-            image_files = sorted(glob(os.path.join(original_vid_path, '*.jpg')))
-            if not image_files:
-                # print(f"  警告: 视频 {vid_folder_name} 中未找到 .jpg 文件。")
-                continue  # 处理下一个视频
-
-            processed_videos_count += 1  # 确认这个视频文件夹有图像需要处理
-
-            # 检查这个视频是否有对应的忽略数据（可选，仅用于提示）
-            video_has_ignore_data = vid_folder_name in self.ignore_data_df[
-                'video_folder'].unique() if not self.ignore_data_df.empty else False
-            if not video_has_ignore_data:
-                print(f"  警告: 视频 {vid_folder_name} 在加载的忽略数据中没有对应条目。此视频中的图像将不会被掩膜。")
-
-            for img_path in image_files:
-                base_name = os.path.basename(img_path)
-                masked_img_path = os.path.join(masked_vid_path, base_name)
-
-                # --- Step 2: 提取帧索引并查找对应的边界框 ---
-                try:
-                    # 提取文件名中的数字部分作为帧索引
-                    # 假设文件名格式为 'imgXXXXX.jpg'
-                    frame_index_str = base_name.replace('.jpg', '').replace('img', '')
-                    frame_index = int(frame_index_str)
-                except (ValueError, IndexError):
-                    print(f"警告: 无法从文件名 {base_name} 提取帧索引，跳过该文件的掩膜处理。")
-                    total_files_skipped += 1
-                    # 决定是否复制原图或跳过
-                    try:  # 尝试复制原图作为后备
-                        shutil.copy2(img_path, masked_img_path)
-                        # print(f"  -> 已复制原图到 {masked_img_path}") # 可选打印
-                    except Exception as copy_e:
-                        print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 失败: {copy_e}")
-                        errors_occurred = True  # 复制失败也算错误
-                    continue  # 跳过对该文件的掩膜处理
-
-                # 从加载的 DataFrame 中筛选出当前视频和当前帧的边界框数据
-                # 如果 ignore_data_df 为空，或者找不到匹配项，这里将返回一个空的 DataFrame
-                current_frame_bboxes_df = self.ignore_data_df[
-                    (self.ignore_data_df['video_folder'] == vid_folder_name) &
-                    (self.ignore_data_df['frame_index'] == frame_index)
-                    ]
-
-                # 将筛选出的 DataFrame 行转换为 _apply_mask_to_image 需要的列表格式
-                # 如果 current_frame_bboxes_df 为空，to_dict('records') 将返回一个空列表 []
-                bboxes_list = current_frame_bboxes_df[['bbox_left', 'bbox_top', 'bbox_width', 'bbox_height']].rename(
-                    columns={
-                        'bbox_left': 'left', 'bbox_top': 'top', 'bbox_width': 'width', 'bbox_height': 'height'
-                    }).to_dict('records')  # 'records' 格式是一个字典列表
-
-                # --- Step 3: 应用掩膜 ---
-                # _apply_mask_to_image 方法会检查 bboxes_to_mask 是否为空，并据此决定是否应用掩膜
-                masked_img = self._apply_mask_to_image(img_path, bboxes_list)
-
-                if masked_img:
-                    try:
-                        masked_img.save(masked_img_path)
-                        total_files_processed += 1
-                    except Exception as e:
-                        print(f"错误: 保存掩膜图像 {masked_img_path} 失败: {e}")
-                        errors_occurred = True
-                else:
-                    # _apply_mask_to_image 返回 None 表示图像加载失败等严重问题
-                    print(f"错误: 无法为 {img_path} 生成掩膜图像 (加载失败或内部处理错误)。")
-                    errors_occurred = True
-                    # 决定是否复制原图作为后备
-                    try:
-                        shutil.copy2(img_path, masked_img_path)
-                        print(f"  -> 已复制原图到 {masked_img_path}")
-                    except Exception as copy_e:
-                        print(f"错误: 复制原图 {img_path} 到 {masked_img_path} 也失败: {copy_e}")
-                        errors_occurred = True  # 复制失败也算错误
-
-        print(f"\n掩膜处理完成。")
-        print(f"处理的视频文件夹数: {processed_videos_count}")
-        print(f"成功处理并保存的图像文件数: {total_files_processed}")
-        print(f"跳过掩膜处理的图像文件数 (文件名格式错误等): {total_files_skipped}")
-
-        if errors_occurred:
-            print("警告: 处理过程中发生错误。请检查日志。")
-            # 根据需要决定是否创建标记文件。通常有错误时不创建，或者创建不同名称的标记文件。
-            # 这里我们选择即使有错误也创建标记文件，但前面的输出会提示错误。
-            pass  # 继续创建标记文件
+        print(f"成功从所有 _gt_ignore.txt 文件解析忽略数据到 {len(frame_ignore_map)} 个帧。")
+        return frame_ignore_map
 
 
     def apply_processing(self, dataset_path):
@@ -396,10 +250,15 @@ class UAVDataLoaderBuilder:
         path = dataset_path
         if self.haze_method != "None":
             print(f"尝试应用雾化方法 '{self.haze_method}'...")
-            path = self.call_processing_function(path, self.haze_method, 'haze')
+            # 传递雾强度参数给处理函数
+            path = self.call_processing_function(path, self.haze_method, 'haze', self.fog_strength)
+        # 如果需要去雾处理，可以在这里添加类似的逻辑
+        # if self.dehaze_method != "None":
+        #     print(f"尝试应用去雾方法 '{self.dehaze_method}'...")
+        #     path = self.call_processing_function(path, self.dehaze_method, 'dehaze')
         return path
 
-    def call_processing_function(self, input_path, method_name, module_prefix):
+    def call_processing_function(self, input_path, method_name, module_prefix, *args):
         """Dynamically imports and calls a processing function."""
         try:
             module_name = f'{module_prefix}.{method_name}'
@@ -414,10 +273,11 @@ class UAVDataLoaderBuilder:
             if not hasattr(module, method_name):
                  print(f"错误: 函数 '{method_name}' 在模块 '{module_name}' 中未找到。")
                  return input_path
-            func = getattr(module, method_name,self.fog_strength)
+            func = getattr(module, method_name) # Get the function
 
             print(f"从 {module_prefix} 模块应用 {method_name} 处理到路径: {input_path}")
-            output_path = func(input_path,self.fog_strength)
+            # 调用函数，将输入路径和额外参数传递进去
+            output_path = func(input_path, *args) # Pass input_path and any extra args
             if output_path is None:
                  print(f"警告: 处理函数 {module_name}.{method_name} 未返回路径。使用原始路径: {input_path}")
                  return input_path
@@ -429,96 +289,139 @@ class UAVDataLoaderBuilder:
             traceback.print_exc()
             return input_path
 
+    # parse_labels_to_frames 保持不变，用于主标签
     def parse_labels_to_frames(self, label_file):
-        """Parses a ground truth file into a dictionary mapping frame numbers to annotations."""
+        """Parses a ground truth file into a dictionary mapping frame numbers to annotations (raw lines)."""
         frame_map = {}
         if not os.path.exists(label_file):
-            print(f"警告: 标签文件未找到: {label_file}")
+            # print(f"警告: 标签文件未找到: {label_file}")
             return frame_map
         with open(label_file, 'r') as f:
             for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'): continue
                 try:
-                    items = line.strip().split(',')
+                    items = line.split(',')
+                    # 假设帧号是第一个字段
                     if not items or not items[0].isdigit():
-                        # print(f"警告: 跳过标签文件中无效帧格式的行 {label_file}: {line.strip()}")
-                        continue
+                         # print(f"警告: 跳过标签文件中无效帧格式的行 {label_file}: {line}")
+                         continue
                     frame = int(items[0])
-                    frame_map.setdefault(frame, []).append(line.strip())
+                    frame_map.setdefault(frame, []).append(line) # 存储原始行
                 except (ValueError, IndexError):
-                    # print(f"警告: 跳过标签文件中无效行格式的行 {label_file}: {line.strip()}")
+                    # print(f"警告: 跳过标签文件中无效行格式的行 {label_file}: {line}")
                     continue
         return frame_map
 
-    def extract_labels(self, video_folder, label_path, ignore_label_path, save_folder):
+    # 修改 extract_labels 以使用帧级忽略映射生成帧级忽略文件 (格式与标签相同)
+    def extract_labels(self, video_folder, vid_name, frame_ignore_map, label_path, label_save_folder, ignore_save_folder):
         """
-        Extracts frame-specific labels and associates ignore files.
+        Extracts frame-specific labels and generates frame-specific ignore files
+        using the pre-parsed frame_ignore_map.
         """
-        os.makedirs(save_folder, exist_ok=True)
-        frame_map = self.parse_labels_to_frames(label_path)
+        os.makedirs(label_save_folder, exist_ok=True)
+        os.makedirs(ignore_save_folder, exist_ok=True) # 创建忽略文件保存目录
+
+        # 解析主标签文件
+        frame_label_map = self.parse_labels_to_frames(label_path)
+
+        # 获取所有图像文件
         image_files = sorted(glob(os.path.join(video_folder, '*.jpg')))
         if not image_files:
              # print(f"警告: 在 {video_folder} 中未找到 .jpg 图像")
-             pass # 允许空列表返回
+             return [], [], [] # 返回空列表
 
         label_files = []
-        ignore_files = []
+        ignore_files = [] # 这个列表现在将存储帧级忽略文件的路径
 
+        # Helper function to get frame number from filename (robust to different formats)
         def get_frame_num_from_filename(filename):
-            import re
-            match = re.search(r'\d+', filename)
-            return int(match.group()) if match else -1
+            # 尝试从文件名中提取数字，通常是最后一个连续的数字串
+            # 假设文件名格式是可排序且数字部分代表帧号 (如 000001.jpg, frame_0001.jpg)
+            match = re.search(r'\d+', os.path.basename(filename))
+            if match:
+                 # 找到所有数字串，取最后一个通常是帧号 (如 video_001/frame_00001.jpg -> 00001)
+                 all_matches = re.findall(r'\d+', os.path.basename(filename))
+                 if all_matches:
+                     return int(all_matches[-1])
+                 # 如果没有数字串，则返回-1
+                 return -1
+            else:
+                 print(f"警告: 无法从文件名 {os.path.basename(filename)} 提取帧号。跳过此文件。")
+                 return -1 # 表示无法确定帧号
 
         for img_path in image_files:
             frame_base_name = os.path.basename(img_path)
-            label_file_name = frame_base_name.replace('.jpg', '.txt')
-            label_file_path = os.path.join(save_folder, label_file_name)
-
             current_frame_num = get_frame_num_from_filename(frame_base_name)
+
             if current_frame_num == -1:
-                 print(f"警告: 无法从 {frame_base_name} 提取帧号。将为此文件创建空标签。")
-                 with open(label_file_path, 'w') as f: pass # 创建空文件
-            else:
-                with open(label_file_path, 'w') as f:
-                    for line in frame_map.get(current_frame_num, []):
-                        f.write(line + '\n')
+                 # 如果无法获取帧号，跳过此图像及其标签/忽略文件生成
+                 continue
 
+            # --- 处理主标签文件 ---
+            # 使用 Path 对象更方便地处理扩展名
+            img_stem = Path(frame_base_name).stem # 获取文件名（不含扩展名）
+            label_file_name = img_stem + '.txt'
+            label_file_path = os.path.join(label_save_folder, label_file_name)
+
+            with open(label_file_path, 'w') as f:
+                # 从解析好的 frame_label_map 中获取当前帧的标签行并写入
+                # frame_label_map 键是整数帧号
+                for line in frame_label_map.get(current_frame_num, []):
+                    f.write(line + '\n')
             label_files.append(label_file_path)
-            ignore_files.append(ignore_label_path)
 
-        if len(image_files) != len(label_files) or len(image_files) != len(ignore_files):
-            print(f"错误: 视频 {video_folder} 的列表长度不匹配。图像: {len(image_files)}, 标签: {len(label_files)}, 忽略: {len(ignore_files)}")
-            # 采取纠正措施，例如截断到最短长度
-            min_len = min(len(image_files), len(label_files), len(ignore_files))
-            image_files = image_files[:min_len]
-            label_files = label_files[:min_len]
-            ignore_files = ignore_files[:min_len]
+            # --- 生成帧级忽略文件 ---
+            ignore_file_name = img_stem + '.txt' # 忽略文件也使用 .txt 扩展名
+            ignore_file_path = os.path.join(ignore_save_folder, ignore_file_name)
 
+            # 从预加载的 frame_ignore_map 中获取当前视频和当前帧的忽略行
+            # frame_ignore_map 键是 (video_folder, frame_index)
+            key = (vid_name, current_frame_num)
+            frame_ignores_lines = frame_ignore_map.get(key, []) # 获取原始行列表
+
+            with open(ignore_file_path, 'w') as f:
+                if frame_ignores_lines:
+                    # 如果找到了忽略行，将原始行直接写入文件 (保持与主标签相同的格式)
+                    for line in frame_ignores_lines:
+                        f.write(line + '\n')
+                # 如果没有忽略行，文件将被创建但为空，这是正确的行为
+
+            ignore_files.append(ignore_file_path) # 添加帧级忽略文件的路径
+
+        # 返回图像文件列表、帧级标签文件列表、帧级忽略文件列表
         return image_files, label_files, ignore_files
 
     def build(self, train_ratio=0.7, val_ratio=0.2, transform=None):
         """
         Builds train, validation, and test datasets (and optionally a clean dataset).
-        Uses the image_root determined in __init__ (original or masked).
+        Uses the image_root determined in __init__ (original or processed).
+        Generates frame-specific label and ignore files before building Datasets.
+        Passes the is_mask flag to the Dataset.
         """
         if not os.path.exists(self.image_root):
              raise FileNotFoundError(f"处理后最终的图像根目录未找到: {self.image_root}")
 
-        video_folders = sorted([d for d in os.listdir(self.image_root) if os.path.isdir(os.path.join(self.image_root, d))])
-        if not video_folders:
-             # 如果 image_root 存在但是空的，这不一定是错误（例如，原始数据就是空的）
+        # 获取经过处理后的图像根目录下的所有视频文件夹
+        # 注意：这里假设视频文件夹的名称与原始标签目录下的视频文件夹名称一致
+        video_folders_in_processed_root = sorted([d for d in os.listdir(self.image_root) if os.path.isdir(os.path.join(self.image_root, d))])
+
+        if not video_folders_in_processed_root:
              print(f"警告: 在最终图像根目录 {self.image_root} 中未找到视频文件夹。数据集将为空。")
              return None, None, None, None # 返回空的 datasets
 
-        random.shuffle(video_folders)
-        n = len(video_folders)
+        # 使用这些文件夹名称来分割数据集
+        random.shuffle(video_folders_in_processed_root)
+        n = len(video_folders_in_processed_root)
         train_end = int(n * train_ratio)
         val_end = train_end + int(n * val_ratio)
 
-        train_set_vids = video_folders[:train_end]
-        val_set_vids = video_folders[train_end:val_end]
-        test_set_vids = video_folders[val_end:]
+        train_set_vids = video_folders_in_processed_root[:train_end]
+        val_set_vids = video_folders_in_processed_root[train_end:val_end]
+        test_set_vids = video_folders_in_processed_root[val_end:]
 
         datasets = {}
+        # 分割并处理每个集合
         for split_name, video_list in [('train', train_set_vids), ('val', val_set_vids), ('test', test_set_vids)]:
             all_imgs, all_labels, all_ignores = [], [], []
             print(f"处理 {split_name} 集，使用来自 {self.image_root} 的图像...")
@@ -528,48 +431,76 @@ class UAVDataLoaderBuilder:
                 continue
 
             for vid_name in video_list:
+                # 图像文件夹路径 (使用处理后的图像根目录)
                 vid_folder_path = os.path.join(self.image_root, vid_name)
+                # 原始完整标签文件路径
                 label_file = os.path.join(self.label_root, f"{vid_name}_gt_whole.txt")
-                ignore_file = os.path.join(self.label_root, f"{vid_name}_gt_ignore.txt")
-                label_save_folder = os.path.join(self.root, 'frame_labels', split_name, vid_name)
 
-                imgs, labels, ignores = self.extract_labels(vid_folder_path, label_file, ignore_file, label_save_folder)
+                # 定义帧级标签和忽略文件的保存目录
+                # 保存到 self.root 下的 frame_labels 和 frame_ignores 目录
+                label_save_folder = os.path.join(self.root, 'frame_labels', split_name, vid_name)
+                ignore_save_folder = os.path.join(self.root, 'frame_ignores', split_name, vid_name) # 新增忽略文件保存目录
+
+                # 调用 extract_labels 来生成帧级文件并获取路径列表
+                # 将加载的所有忽略数据映射 self.all_frame_ignores_map 传递进去
+                imgs, labels, ignores = self.extract_labels(
+                    vid_folder_path,
+                    vid_name, # 传递视频名称以便在 all_frame_ignores_map 中查询
+                    self.all_frame_ignores_map, # 传递加载的忽略数据映射
+                    label_file,
+                    label_save_folder,
+                    ignore_save_folder # 传递忽略文件保存目录
+                )
 
                 all_imgs.extend(imgs)
                 all_labels.extend(labels)
                 all_ignores.extend(ignores)
 
             if not all_imgs:
-                 print(f"警告: 在 {self.image_root} 中未找到 {split_name} 分割的图像。")
+                 print(f"警告: 在 {self.image_root} 中未找到 {split_name} 分割的图像，或处理过程中未生成有效数据。")
                  datasets[split_name] = None
             else:
-                 datasets[split_name] = UAVOriginalDataset(all_imgs, all_labels, all_ignores, transform)
+                 # 创建数据集，传递帧级忽略文件列表和 is_mask 标志
+                 datasets[split_name] = UAVOriginalDataset(all_imgs, all_labels, all_ignores, transform, is_mask=self.is_mask)
                  print(f"  创建了 {split_name} 数据集，包含 {len(all_imgs)} 个样本。")
 
+        # --- 处理 clean 数据集 ---
         clean_dataset = None
         if self.is_clean:
             all_imgs_clean, all_labels_clean, all_ignores_clean = [], [], []
             print(f"处理 clean 集，使用来自 {self.image_root} 的图像...")
-            clean_set_vids = train_set_vids # 假设 clean 使用与 train 相同的视频源
+
+            # 通常 clean 数据集使用训练集的数据
+            clean_set_vids = train_set_vids
             if not clean_set_vids:
                 print(f"  clean 集中没有分配到视频 (基于 train 集)。")
             else:
                 for vid_name in clean_set_vids:
                     vid_folder_path = os.path.join(self.image_root, vid_name)
                     label_file = os.path.join(self.label_root, f"{vid_name}_gt_whole.txt")
-                    ignore_file = os.path.join(self.label_root, f"{vid_name}_gt_ignore.txt")
+
+                    # 定义 clean 集的帧级标签和忽略文件的保存目录
                     label_save_folder = os.path.join(self.root, 'frame_labels', 'clean', vid_name)
-                    imgs, labels, ignores = self.extract_labels(vid_folder_path, label_file, ignore_file, label_save_folder)
+                    ignore_save_folder = os.path.join(self.root, 'frame_ignores', 'clean', vid_name) # clean 集的忽略文件保存目录
+
+                    imgs, labels, ignores = self.extract_labels(
+                        vid_folder_path,
+                        vid_name,
+                        self.all_frame_ignores_map, # clean 集也使用相同的忽略数据映射
+                        label_file,
+                        label_save_folder,
+                        ignore_save_folder
+                    )
                     all_imgs_clean.extend(imgs)
                     all_labels_clean.extend(labels)
                     all_ignores_clean.extend(ignores)
 
                 if not all_imgs_clean:
-                     print(f"警告: 未找到 clean 分割的图像。")
+                     print(f"警告: 未找到 clean 分割的图像，或处理过程中未生成有效数据。")
                 else:
-                    clean_dataset = UAVOriginalDataset(all_imgs_clean, all_labels_clean, all_ignores_clean, transform)
+                    # 创建 clean 数据集，同样传递帧级忽略文件列表和 is_mask 标志
+                    clean_dataset = UAVOriginalDataset(all_imgs_clean, all_labels_clean, all_ignores_clean, transform, is_mask=self.is_mask)
                     print(f"  创建了 clean 数据集，包含 {len(all_imgs_clean)} 个样本。")
 
         return datasets.get('train'), datasets.get('val'), datasets.get('test'), clean_dataset
-
 

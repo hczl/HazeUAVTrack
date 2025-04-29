@@ -9,15 +9,16 @@ from tqdm import tqdm
 from ultralytics import YOLO
 import yaml
 
-from .yolov3 import convert_targets_to_yolo, process_and_return_loaders, changeed__call__
+from .yolov3 import process_and_return_loaders, changeed__call__
 from .IA_config import Settings
 
 from .CNN_PP import CNN_PP
 from .DIP import DIP_Module
-from models.IA_YOLOV3.yolo_utils import AtmLight,DarkIcA,DarkChannel
+from models.IA_YOLOV3.yolo_utils import AtmLight, DarkIcA, DarkChannel
 
 from .yolo_utils import load_config
 import torch.nn.functional as F
+
 
 class IA_YOLOV3(nn.Module):
     def __init__(self, config):
@@ -39,7 +40,7 @@ class IA_YOLOV3(nn.Module):
             torch.cuda.empty_cache()  # 释放 GPU 内存（如果使用了）
         # self.yolov3.info()
 
-    def forward(self, inputs, detach_dip=False, yolo_forward= False):
+    def forward(self, inputs, detach_dip=False, yolo_forward=False):
         n, c, _, _ = inputs.shape
         resized_inputs = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
         dark = torch.zeros((inputs.shape[0], inputs.shape[2], inputs.shape[3]),
@@ -81,29 +82,102 @@ class IA_YOLOV3(nn.Module):
         # return cnn_pp_output, yolov3_predictions # Return both outputs for loss calculation if needed
 
     def train_step(self, tra_batch, clean_batch):
+        """
+        Performs a single training step combining DIP and YOLO losses.
+
+        Args:
+            tra_batch (tuple): Batch data for YOLO training. Expected format:
+                               (processed_low_res_images, processed_yolo_targets_dict, processed_ignore_list)
+                               - processed_low_res_images: Tensor [B, C, H, W]
+                               - processed_yolo_targets_dict: Dict {"batch_idx": ..., "cls": ..., "bboxes": ...}
+                               - processed_ignore_list: List of tensors [num_ignore_i, 5] for each image,
+                                                        where each tensor is [class_id, x_c, y_c, w, h] normalized.
+            clean_batch (tuple): Batch data for DIP training. Expected format:
+                                 (targets_dip, _, _)
+                                 - targets_dip: Tensor [B, ...]
+
+        Returns:
+            dict: Dictionary containing itemized 'yolov3_loss' and 'dip_loss'.
+        """
         torch.autograd.set_detect_anomaly(True)
-        targets_dip, _ = clean_batch
-        low_res_images, targets_yolov3 = tra_batch
-        # print(targets_yolov3)
-        # print(type(targets_yolov3))
-        low_res_images = low_res_images.to(self.device)
+
+        # --- Process clean_batch for DIP loss ---
+        targets_dip, _, _ = clean_batch
         targets_dip = targets_dip.to(self.device)
 
-        self.optimizer.zero_grad()
-        # print(targets_yolov3[0].shape)
-        dip_output= self(low_res_images, detach_dip=True)
+        # --- Process tra_batch for YOLO loss ---
+        # Assuming tra_batch is already processed by a function like process_batch
+        # and contains the necessary components. The third element is the processed
+        # list of ignore boxes per image.
+        low_res_images, targets_yolov3, processed_ignore_list = tra_batch
 
+        # Move images and existing target tensors to device
+        low_res_images = low_res_images.to(self.device)
+        targets_yolov3["batch_idx"] = targets_yolov3["batch_idx"].to(self.device)
+        targets_yolov3["cls"] = targets_yolov3["cls"].to(self.device)
+        targets_yolov3["bboxes"] = targets_yolov3["bboxes"].to(self.device)
+
+        # --- Process and merge ignore targets into the target dictionary ---
+        # Combine the list of ignore box tensors into a single tensor and add batch indices
+        combined_ignore_boxes_list = []
+        if processed_ignore_list is not None:
+            for i, ignore_boxes_for_image in enumerate(processed_ignore_list):
+                # ignore_boxes_for_image is expected to be [num_ignore_i, 5] with [class_id, x_c, y_c, w, h] normalized
+                if ignore_boxes_for_image.numel() > 0:
+                    # Create batch index column (float type to match other tensors)
+                    batch_idx_tensor = torch.full((ignore_boxes_for_image.shape[0], 1), i, dtype=torch.float32,
+                                                  device=self.device)
+                    # Concatenate batch_idx column with the ignore box tensor
+                    # Resulting format: [batch_idx, class_id, x_c, y_c, w, h]
+                    combined_row = torch.cat([batch_idx_tensor, ignore_boxes_for_image.to(self.device)], dim=1)
+                    combined_ignore_boxes_list.append(combined_row)
+
+        # Concatenate all ignore boxes into a single tensor for the batch
+        if len(combined_ignore_boxes_list) > 0:
+            final_ignored_bboxes_tensor = torch.cat(combined_ignore_boxes_list, dim=0)
+            # Add this tensor to the targets dictionary under a specific key.
+            # The YOLO loss function (specifically, the assigner within it)
+            # must be modified elsewhere to recognize and use this key
+            # (e.g., "ignored_bboxes") to mark predictions within these
+            # regions as 'ignore' rather than positive or negative.
+            targets_yolov3["ignored_bboxes"] = final_ignored_bboxes_tensor
+        else:
+            # Add an empty tensor if no ignore boxes exist in the batch
+            # Ensure the shape matches the expected format [N, 6]
+            targets_yolov3["ignored_bboxes"] = torch.empty(0, 6, dtype=torch.float32,
+                                                           device=self.device)  # Expected format: [batch_idx, cls, x, y, w, h]
+        # --- End of ignore target processing ---
+
+        # --- Training steps ---
+        self.optimizer.zero_grad()
+
+        # First forward pass: Get DIP output (detach it for DIP loss calculation)
+        # This output is also used internally by the YOLO head when yolo_forward=True
+        dip_output = self(low_res_images, detach_dip=True)
+
+        # Calculate and backpropagate DIP loss
         dip_loss = self.calculate_dip_loss(dip_output, targets_dip)
+        # retain_graph=True is needed because we will perform a second backward pass for YOLO loss
         dip_loss.backward(retain_graph=True)
-        # forward 返回 DIP 输出 和 yolov3 的 multi-scale 输出
-        yolov3_output = self(low_res_images,yolo_forward=True)
+        self.optimizer.zero_grad()
+        # Clip gradients for DIP module parameters
+        torch.nn.utils.clip_grad_norm_(self.dip_module.parameters(), max_norm=1.0)
+
+        # Second forward pass: Get YOLO multi-scale outputs
+        # The model uses the DIP output calculated in the first pass internally
+        yolov3_output = self(low_res_images, yolo_forward=True)
+
         yolov3_loss_tuple = self.yolov3_wrapper.loss(targets_yolov3, yolov3_output)
         yolov3_loss = sum([t.sum() for t in yolov3_loss_tuple])
 
+        # Backpropagate YOLO loss
+        # This will backpropagate through the YOLO head and the shared backbone/DIP module
         yolov3_loss.backward()
 
+        # Perform optimizer step (updates parameters for both DIP and YOLO parts)
         self.optimizer.step()
 
+        # Return loss values for logging/monitoring
         return {
             'yolov3_loss': yolov3_loss.item(),
             'dip_loss': dip_loss.item()
@@ -112,8 +186,8 @@ class IA_YOLOV3(nn.Module):
     def train_epoch(self, train_loader, clean_loader, epoch):
         epoch_yolov3_loss = 0.0
         epoch_dip_loss = 0.0
-        train_loader, _ = process_and_return_loaders(train_loader)
-        clean_loader, _ = process_and_return_loaders(clean_loader)
+        train_loader= process_and_return_loaders(train_loader)
+        clean_loader= process_and_return_loaders(clean_loader)
         pbar = tqdm(zip(train_loader, clean_loader), total=self.train_batch_nums, desc=f"Epoch {epoch}")
         for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
             train_info = self.train_step(tra_batch, clean_batch)
@@ -138,15 +212,49 @@ class IA_YOLOV3(nn.Module):
 
     def evaluate(self, val_loader):
         total_yolov3_loss = 0.0
-        val_loader, _ = process_and_return_loaders(val_loader)
+        val_loader= process_and_return_loaders(val_loader)
         with torch.no_grad():
             pbar = tqdm(val_loader, total=self.val_batch_nums, desc=f"Val")
             for batch_idx, val_batch in enumerate(pbar):
                 # 获取输入和标签
-                low_res_images, targets_yolov3 = val_batch
+                low_res_images, targets_yolov3, processed_ignore_list = val_batch
 
-                # 移动到设备
+                # Move images and existing target tensors to device
                 low_res_images = low_res_images.to(self.device)
+                targets_yolov3["batch_idx"] = targets_yolov3["batch_idx"].to(self.device)
+                targets_yolov3["cls"] = targets_yolov3["cls"].to(self.device)
+                targets_yolov3["bboxes"] = targets_yolov3["bboxes"].to(self.device)
+
+                # --- Process and merge ignore targets into the target dictionary ---
+                # Combine the list of ignore box tensors into a single tensor and add batch indices
+                combined_ignore_boxes_list = []
+                if processed_ignore_list is not None:
+                    for i, ignore_boxes_for_image in enumerate(processed_ignore_list):
+                        # ignore_boxes_for_image is expected to be [num_ignore_i, 5] with [class_id, x_c, y_c, w, h] normalized
+                        if ignore_boxes_for_image.numel() > 0:
+                            # Create batch index column (float type to match other tensors)
+                            batch_idx_tensor = torch.full((ignore_boxes_for_image.shape[0], 1), i, dtype=torch.float32,
+                                                          device=self.device)
+                            # Concatenate batch_idx column with the ignore box tensor
+                            # Resulting format: [batch_idx, class_id, x_c, y_c, w, h]
+                            combined_row = torch.cat([batch_idx_tensor, ignore_boxes_for_image.to(self.device)], dim=1)
+                            combined_ignore_boxes_list.append(combined_row)
+
+                # Concatenate all ignore boxes into a single tensor for the batch
+                if len(combined_ignore_boxes_list) > 0:
+                    final_ignored_bboxes_tensor = torch.cat(combined_ignore_boxes_list, dim=0)
+                    # Add this tensor to the targets dictionary under a specific key.
+                    # The YOLO loss function (specifically, the assigner within it)
+                    # must be modified elsewhere to recognize and use this key
+                    # (e.g., "ignored_bboxes") to mark predictions within these
+                    # regions as 'ignore' rather than positive or negative.
+                    targets_yolov3["ignored_bboxes"] = final_ignored_bboxes_tensor
+                else:
+                    # Add an empty tensor if no ignore boxes exist in the batch
+                    # Ensure the shape matches the expected format [N, 6]
+                    targets_yolov3["ignored_bboxes"] = torch.empty(0, 6, dtype=torch.float32,
+                                                                   device=self.device)  # Expected format: [batch_idx, cls, x, y, w, h]
+                # --- End of ignore target processing ---
 
                 # YOLO前向
                 yolov3_output = self(low_res_images, yolo_forward=True)
@@ -182,7 +290,6 @@ class IA_YOLOV3(nn.Module):
         criterion = nn.MSELoss()
         return criterion(dip_output, targets_dip)
 
-
     def save_checkpoint(self, epoch, checkpoint_path):
         checkpoint = {
             'epoch': epoch,
@@ -212,13 +319,14 @@ class IA_YOLOV3(nn.Module):
             filter(lambda p: p.requires_grad, self.parameters()), lr=self.config['train']['lr']
         )
 
-    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100, checkpoint_dir='./models/IA_YOLOV3/checkpoints'):
+    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100,
+                    checkpoint_dir='./models/IA_YOLOV3/checkpoints'):
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         best_loss = float('inf')
         # 训练前预处理
-        _, self.train_batch_nums= process_and_return_loaders(train_loader)
-        _, self.val_batch_nums = process_and_return_loaders(val_loader)
+        self.train_batch_nums = len(train_loader)
+        self.val_batch_nums = len(val_loader)
         if self.config['train']['resume_training']:
             print("==> 尝试加载最近 checkpoint ...")
             checkpoint_path = os.path.join(checkpoint_dir, 'best_model.pth')
@@ -274,6 +382,7 @@ if __name__ == '__main__':
     import sys
 
     from torch.utils.data import DataLoader, RandomSampler
+
     current_file_path = os.path.abspath(__file__)
     # print(sys.path)
 
@@ -289,12 +398,14 @@ if __name__ == '__main__':
 
     cfg = load_config(r'D:\FFFFFiles\bis_sheji\configs\exp1.yaml')
     from utils.DataLoader import UAVDataLoaderBuilder, custom_collate_fn
+
     builder = UAVDataLoaderBuilder(cfg)
 
     transform = transforms.Compose([
         transforms.ToTensor()
     ])
-    train_dataset, val_dataset, test_dataset, clean_dataset = builder.build(train_ratio=0.7, val_ratio=0.2, transform=transform)
+    train_dataset, val_dataset, test_dataset, clean_dataset = builder.build(train_ratio=0.7, val_ratio=0.2,
+                                                                            transform=transform)
     generator_train = torch.Generator().manual_seed(cfg['seed'])
     sampler_train = RandomSampler(train_dataset, generator=generator_train)
     train_loader = DataLoader(train_dataset, batch_size=8, sampler=sampler_train, collate_fn=custom_collate_fn)
@@ -306,14 +417,16 @@ if __name__ == '__main__':
     # 4. Move model to device (if you have CUDA)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    model.device = device # Add device attribute for model to use
+    model.device = device  # Add device attribute for model to use
 
     # 5. Create an optimizer
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    model.optimizer = optimizer # Add optimizer to the model
+    model.optimizer = optimizer  # Add optimizer to the model
 
     # 6. Test forward pass
-    dummy_input = torch.randn(4, 3, 1024, 540).to(device) # Batch of 2, 3 channels, 512x512
+    dummy_input = torch.randn(4, 3, 1024, 540).to(device)  # Batch of 2, 3 channels, 512x512
+
+
     # output = model(dummy_input,dummy_input)
     def get_shape(a):
         shape = []
