@@ -438,7 +438,8 @@ class DE_NET(nn.Module):
         output = self(low_res_images)
 
         loss_tuple = self.yolov3_wrapper.loss(targets_yolov3, output)
-        loss = sum([t.sum() for t in loss_tuple])
+        all_loss_tensors = [loss for group in loss_tuple for loss in group]
+        loss = sum(all_loss_tensors)
 
         loss.backward()
 

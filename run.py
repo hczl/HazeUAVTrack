@@ -3,7 +3,7 @@ import argparse
 
 import torch
 from torch import optim
-
+os.environ['TORCH_HOME'] = './.torch'
 
 from utils.common import create_model, create_data
 from utils.config import load_config
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/exp2.yaml",
+        default="configs/exp3.yaml",
         help="配置文件路径（默认: configs/exp1.yaml）"
     )
     args = parser.parse_args()

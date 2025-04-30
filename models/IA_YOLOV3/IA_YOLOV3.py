@@ -14,7 +14,7 @@ from .IA_config import Settings
 
 from .CNN_PP import CNN_PP
 from .DIP import DIP_Module
-from models.IA_YOLOV3.yolo_utils import AtmLight, DarkIcA, DarkChannel
+from .yolo_utils import AtmLight, DarkIcA, DarkChannel
 
 from .yolo_utils import load_config
 import torch.nn.functional as F
@@ -166,20 +166,20 @@ class IA_YOLOV3(nn.Module):
         # Second forward pass: Get YOLO multi-scale outputs
         # The model uses the DIP output calculated in the first pass internally
         yolov3_output = self(low_res_images, yolo_forward=True)
-
+        # print("yolov3_output", [len(yolov3_output[i]) for i in range(len(yolov3_output))])
         yolov3_loss_tuple = self.yolov3_wrapper.loss(targets_yolov3, yolov3_output)
-        yolov3_loss = sum([t.sum() for t in yolov3_loss_tuple])
-
-        # Backpropagate YOLO loss
-        # This will backpropagate through the YOLO head and the shared backbone/DIP module
-        yolov3_loss.backward()
+        # 将所有 tensor 项展平成一个列表，然后相加
+        all_loss_tensors = [loss for group in yolov3_loss_tuple for loss in group]
+        yolov3_total_loss = sum(all_loss_tensors)
+        # print(yolov3_total_loss)
+        yolov3_total_loss.backward()
 
         # Perform optimizer step (updates parameters for both DIP and YOLO parts)
         self.optimizer.step()
 
         # Return loss values for logging/monitoring
         return {
-            'yolov3_loss': yolov3_loss.item(),
+            'yolov3_loss': yolov3_total_loss,
             'dip_loss': dip_loss.item()
         }
 

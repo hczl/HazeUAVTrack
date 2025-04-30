@@ -7,7 +7,7 @@ import yaml
 import random
 import importlib.util
 from glob import glob
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 from PIL import Image, ImageDraw
 import shutil
 import time
@@ -15,6 +15,16 @@ from pathlib import Path # 更方便地处理路径和创建空文件
 import re # 用于从文件名提取帧号
 import traceback # 用于打印完整的错误堆栈
 
+class IndexSampler(Sampler):
+    def __init__(self, indices):
+        super().__init__()
+        self.indices = indices
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
 # custom_collate_fn 需要修改以处理潜在的第三个返回值，并期望 ignore 和 label 格式一致
 def custom_collate_fn(batch):
     """
@@ -468,7 +478,7 @@ class UAVDataLoaderBuilder:
         clean_dataset = None
         if self.is_clean:
             all_imgs_clean, all_labels_clean, all_ignores_clean = [], [], []
-            print(f"处理 clean 集，使用来自 {self.image_root} 的图像...")
+            print(f"处理 clean 集，使用来自 {self.original_image_root} 的图像...")
 
             # 通常 clean 数据集使用训练集的数据
             clean_set_vids = train_set_vids
@@ -476,7 +486,7 @@ class UAVDataLoaderBuilder:
                 print(f"  clean 集中没有分配到视频 (基于 train 集)。")
             else:
                 for vid_name in clean_set_vids:
-                    vid_folder_path = os.path.join(self.image_root, vid_name)
+                    vid_folder_path = os.path.join(self.original_image_root, vid_name)
                     label_file = os.path.join(self.label_root, f"{vid_name}_gt_whole.txt")
 
                     # 定义 clean 集的帧级标签和忽略文件的保存目录

@@ -7,7 +7,7 @@ experiment_name: "exp1_dcp_yolov5_sort"
 haze_method: "MiDaS_Deep"
 
 # 检测器，可选: IA_YOLOV3, DE_NET, DITOL
-detector: "IA_YOLOV3"
+detector: "DITOL"
 
 # 跟踪算法，可选: SORT
 tracker: "SORT"
@@ -21,19 +21,18 @@ dataset:
   fog_strength: 0.75
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 16
+  batch: 6
   is_mask: True
   path: "./data/UAV-M"
   data_path: "UAV-benchmark-M"
   label_path: "UAV-benchmark-MOTD_v1.0/GT"
   is_clean: True
-  shuffle: True
+  shuffle: Flase
 # 是否保存可视化结果
 save_output: true
 
 # 随机种子
 seed: 2025
-
 
 
 # 训练参数

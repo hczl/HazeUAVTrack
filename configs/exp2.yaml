@@ -6,7 +6,7 @@ experiment_name: "exp1_dcp_yolov5_sort"
 # 生成雾方法，可选: None,MiDaS_Deep
 haze_method: "MiDaS_Deep"
 
-# 检测器，可选: IA_YOLOV3, DE_NET
+# 检测器，可选: IA_YOLOV3, DE_NET, DITOL
 detector: "DE_NET"
 
 # 跟踪算法，可选: SORT
@@ -27,6 +27,7 @@ dataset:
   data_path: "UAV-benchmark-M"
   label_path: "UAV-benchmark-MOTD_v1.0/GT"
   is_clean: False
+  shuffle: True
 # 是否保存可视化结果
 save_output: true
 
