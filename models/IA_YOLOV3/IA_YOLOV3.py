@@ -1,13 +1,10 @@
 import os
-from types import SimpleNamespace
-
 import torch
 import torch.nn as nn
 import ultralytics
 from torch import optim
 from tqdm import tqdm
 from ultralytics import YOLO
-import yaml
 
 from .yolov3 import process_and_return_loaders, changeed__call__
 from .IA_config import Settings
@@ -319,8 +316,8 @@ class IA_YOLOV3(nn.Module):
             filter(lambda p: p.requires_grad, self.parameters()), lr=self.config['train']['lr']
         )
 
-    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100,
-                    checkpoint_dir='./models/IA_YOLOV3/checkpoints'):
+    def train_model(self, train_loader, val_loader, train_clean_loader, val_clean_loader, start_epoch=0,
+                    num_epochs=100, checkpoint_dir='./models/IA_YOLOV3/checkpoints'):
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         best_loss = float('inf')
@@ -352,7 +349,7 @@ class IA_YOLOV3(nn.Module):
             # print(f"\nEpoch {epoch + 1}/{num_epochs}")
             # # progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
 
-            self.train_epoch(train_loader, clean_loader, epoch)
+            self.train_epoch(train_loader, train_clean_loader, epoch)
 
             # 验证集
             if val_loader:
@@ -378,79 +375,3 @@ class IA_YOLOV3(nn.Module):
         print("训练完成！")
 
 
-if __name__ == '__main__':
-    import sys
-
-    from torch.utils.data import DataLoader, RandomSampler
-
-    current_file_path = os.path.abspath(__file__)
-    # print(sys.path)
-
-    current_dir = os.path.dirname(current_file_path)
-
-    project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
-
-    # 4. 将项目根目录添加到 sys.path 的最前面
-    # 这样做是为了确保 Python 优先在你的项目根目录中查找模块
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-    from torchvision import transforms
-
-    cfg = load_config(r'D:\FFFFFiles\bis_sheji\configs\exp1.yaml')
-    from utils.DataLoader import UAVDataLoaderBuilder, custom_collate_fn
-
-    builder = UAVDataLoaderBuilder(cfg)
-
-    transform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    train_dataset, val_dataset, test_dataset, clean_dataset = builder.build(train_ratio=0.7, val_ratio=0.2,
-                                                                            transform=transform)
-    generator_train = torch.Generator().manual_seed(cfg['seed'])
-    sampler_train = RandomSampler(train_dataset, generator=generator_train)
-    train_loader = DataLoader(train_dataset, batch_size=8, sampler=sampler_train, collate_fn=custom_collate_fn)
-    val_dataloader = DataLoader(val_dataset, batch_size=4)
-
-    # 3. Instantiate the model
-    model = IA_YOLOV3(cfg)
-
-    # 4. Move model to device (if you have CUDA)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.device = device  # Add device attribute for model to use
-
-    # 5. Create an optimizer
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    model.optimizer = optimizer  # Add optimizer to the model
-
-    # 6. Test forward pass
-    dummy_input = torch.randn(4, 3, 1024, 540).to(device)  # Batch of 2, 3 channels, 512x512
-
-
-    # output = model(dummy_input,dummy_input)
-    def get_shape(a):
-        shape = []
-        try:
-            while True:
-                shape.append(len(a))
-                a = a[0]
-        except:
-            pass
-        return shape
-    # print(len(output))
-    # model.train_model(dummy_input,)
-    # print(get_shape(output[1]))
-    # cnn_pp_output, yolov3_predictions = model(dummy_input)
-    # print("CNN_PP Output Shape:", cnn_pp_output[0].shape) # Print shape of filter_features
-    # print("YOLOv3 Predictions Shape:", yolov3_predictions.shape)
-    #
-    # # 7. Test training for a few epochs
-    # print("\n--- Starting Training Test ---")
-    # model.train_model(train_dataloader, val_dataloader, num_epochs=2, checkpoint_dir='./test_checkpoints') # Train for 2 epochs
-    #
-    # # 8. Test checkpoint saving and loading
-    # checkpoint_path = './test_checkpoints/checkpoint_epoch_1.pth' # Path to the saved checkpoint from epoch 1
-    # loaded_start_epoch = model.load_checkpoint(checkpoint_path)
-    # print(f"\nLoaded checkpoint, starting epoch: {loaded_start_epoch}")
-    #
-    # print("\n--- Testing Completed ---")

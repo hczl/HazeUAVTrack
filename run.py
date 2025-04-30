@@ -16,12 +16,13 @@ def run(config_path):
     os.makedirs(f"experiments/{cfg['experiment_name']}/results", exist_ok=True)
 
     # 2.数据集创建
-    train_loader, val_loader, test_loader, clean_loader = create_data(cfg)
+    train_loader, val_loader, test_loader, train_clean_loader, val_clean_loader = create_data(cfg)
 
     # 3.模型创建
     model = create_model(cfg)
     # 4.模型训练
-    model.train_model(train_loader=train_loader, val_loader=val_loader, clean_loader=clean_loader, num_epochs=cfg['train']['epochs'])
+    model.train_model(train_loader=train_loader, val_loader=val_loader, train_clean_loader=train_clean_loader,
+                      val_clean_loader = val_clean_loader, num_epochs=cfg['train']['epochs'])
     # for img_path in dataset:
     #     image = cv2.imread(img_path)
     #     if dehaze_method:

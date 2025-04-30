@@ -47,3 +47,49 @@ def process_batch(batch):
 
     processed_images_tensor =torch.stack(processed_images, dim=0)
     return processed_images_tensor, processed_targets, processed_ignores
+
+def build_detection_targets(bboxes, image_size, feature_size, ignore_regions=None):
+    """
+    bboxes: Tensor of shape [N, 6] (left, top, width, height, ...)
+    image_size: (H, W)
+    feature_size: (H', W')
+    ignore_regions: Tensor of shape [M, 6] if provided
+    """
+    H, W = image_size
+    Hf, Wf = feature_size
+    scale_x = Wf / W
+    scale_y = Hf / H
+
+    gt_obj = torch.zeros((1, Hf, Wf))  # objectness
+    gt_box = torch.zeros((4, Hf, Wf))  # dx, dy, w, h
+
+    for box in bboxes:
+        left, top, width, height = box[2:6]
+        cx = (left + width / 2.0) * scale_x
+        cy = (top + height / 2.0) * scale_y
+
+        i = int(cy)
+        j = int(cx)
+        if i < 0 or i >= Hf or j < 0 or j >= Wf:
+            continue
+
+        dx = cx - j
+        dy = cy - i
+        gt_obj[0, i, j] = 1
+        gt_box[:, i, j] = torch.tensor([dx, dy, width * scale_x, height * scale_y])
+
+    # 构造 ignore mask
+    ignore_mask = torch.zeros((1, Hf, Wf))
+    if ignore_regions is not None:
+        for ign in ignore_regions:
+            l, t, w, h = ign[2:6]
+            x0 = int((l) * scale_x)
+            y0 = int((t) * scale_y)
+            x1 = int((l + w) * scale_x)
+            y1 = int((t + h) * scale_y)
+            ignore_mask[0, y0:y1, x0:x1] = 1
+
+    return gt_obj, gt_box, ignore_mask
+
+
+

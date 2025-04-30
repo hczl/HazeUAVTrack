@@ -1,11 +1,15 @@
 import math
 
+import cv2
+import numpy as np
 import torch
 from torchvision import transforms
 from torch.utils.data import DataLoader  # Import DataLoader for type hinting
 from ultralytics.utils.tal import make_anchors
-from typing import Generator, Tuple, Any  # 导入用于类型提示
+from typing import Generator, Tuple, Any, Dict  # 导入用于类型提示
 from ultralytics.utils.ops import xywh2xyxy, xywhn2xyxy, xyxy2xywh # 需要 xywhn2xyxy 转换忽略框，xyxy2xywh 计算中心点
+
+
 def convert_targets_to_yolo(target_tensor, image_size):
     """
     将自定义格式的目标标签转换为YOLO格式:

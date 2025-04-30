@@ -474,8 +474,9 @@ class UAVDataLoaderBuilder:
                  datasets[split_name] = UAVOriginalDataset(all_imgs, all_labels, all_ignores, transform, is_mask=self.is_mask)
                  print(f"  创建了 {split_name} 数据集，包含 {len(all_imgs)} 个样本。")
 
-        # --- 处理 clean 数据集 ---
+        # --- 处理 clean 数据集 (train_clean 和 val_clean) ---
         clean_dataset = None
+        val_clean_dataset = None
         if self.is_clean:
             all_imgs_clean, all_labels_clean, all_ignores_clean = [], [], []
             print(f"处理 clean 集，使用来自 {self.original_image_root} 的图像...")
@@ -491,12 +492,12 @@ class UAVDataLoaderBuilder:
 
                     # 定义 clean 集的帧级标签和忽略文件的保存目录
                     label_save_folder = os.path.join(self.root, 'frame_labels', 'clean', vid_name)
-                    ignore_save_folder = os.path.join(self.root, 'frame_ignores', 'clean', vid_name) # clean 集的忽略文件保存目录
+                    ignore_save_folder = os.path.join(self.root, 'frame_ignores', 'clean', vid_name)  # clean 集的忽略文件保存目录
 
                     imgs, labels, ignores = self.extract_labels(
                         vid_folder_path,
                         vid_name,
-                        self.all_frame_ignores_map, # clean 集也使用相同的忽略数据映射
+                        self.all_frame_ignores_map,  # clean 集也使用相同的忽略数据映射
                         label_file,
                         label_save_folder,
                         ignore_save_folder
@@ -504,13 +505,44 @@ class UAVDataLoaderBuilder:
                     all_imgs_clean.extend(imgs)
                     all_labels_clean.extend(labels)
                     all_ignores_clean.extend(ignores)
+            clean_dataset = UAVOriginalDataset(all_imgs_clean, all_labels_clean, all_ignores_clean, transform,
+                                               is_mask=self.is_mask)
+            print(f"  创建了 clean 数据集，包含 {len(all_imgs_clean)} 个样本。")
 
-                if not all_imgs_clean:
-                     print(f"警告: 未找到 clean 分割的图像，或处理过程中未生成有效数据。")
+            # val_clean 构建
+            all_imgs_val_clean, all_labels_val_clean, all_ignores_val_clean = [], [], []
+            print(f"处理 val_clean 集，使用来自 {self.original_image_root} 的图像...")
+
+            val_set_vids_clean = val_set_vids
+            if not val_set_vids_clean:
+                print(f"  val_clean 集中没有分配到视频。")
+            else:
+                for vid_name in val_set_vids_clean:
+                    vid_folder_path = os.path.join(self.original_image_root, vid_name)
+                    label_file = os.path.join(self.label_root, f"{vid_name}_gt_whole.txt")
+
+                    label_save_folder = os.path.join(self.root, 'frame_labels', 'val_clean', vid_name)
+                    ignore_save_folder = os.path.join(self.root, 'frame_ignores', 'val_clean', vid_name)
+
+                    imgs, labels, ignores = self.extract_labels(
+                        vid_folder_path,
+                        vid_name,
+                        self.all_frame_ignores_map,
+                        label_file,
+                        label_save_folder,
+                        ignore_save_folder
+                    )
+                    all_imgs_val_clean.extend(imgs)
+                    all_labels_val_clean.extend(labels)
+                    all_ignores_val_clean.extend(ignores)
+
+                if not all_imgs_val_clean:
+                    print(f"警告: 未找到 val_clean 分割的图像，或处理过程中未生成有效数据。")
                 else:
-                    # 创建 clean 数据集，同样传递帧级忽略文件列表和 is_mask 标志
-                    clean_dataset = UAVOriginalDataset(all_imgs_clean, all_labels_clean, all_ignores_clean, transform, is_mask=self.is_mask)
-                    print(f"  创建了 clean 数据集，包含 {len(all_imgs_clean)} 个样本。")
+                    val_clean_dataset = UAVOriginalDataset(all_imgs_val_clean, all_labels_val_clean,
+                                                           all_ignores_val_clean, transform, is_mask=self.is_mask)
+                    print(f"  创建了 val_clean 数据集，包含 {len(all_imgs_val_clean)} 个样本。")
 
-        return datasets.get('train'), datasets.get('val'), datasets.get('test'), clean_dataset
+        return datasets.get('train'), datasets.get('val'), datasets.get('test'), clean_dataset, val_clean_dataset
+
 

@@ -467,7 +467,8 @@ class DE_NET(nn.Module):
         print(f"Epoch {epoch} 训练完成，平均 Loss: {avg_loss:.4f}")
         return avg_loss
 
-    def train_model(self, train_loader, val_loader, clean_loader, start_epoch=0, num_epochs=100, checkpoint_dir='./models/DE_NET/checkpoints'):
+    def train_model(self, train_loader, val_loader, train_clean_loader, val_clean_loader,
+                    start_epoch=0, num_epochs=100, checkpoint_dir='./models/DE_NET/checkpoints'):
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         best_loss = float('inf')

@@ -19,8 +19,8 @@ iou_threshold: 0.5
 # 数据集路径与设置
 dataset:
   fog_strength: 0.75
-  train_ratio: 0.8
-  val_ratio: 0.1
+  train_ratio: 0.05
+  val_ratio: 0.05
   batch: 6
   is_mask: True
   path: "./data/UAV-M"
