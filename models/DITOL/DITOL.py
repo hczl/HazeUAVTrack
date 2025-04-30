@@ -308,7 +308,7 @@ class DITOL(nn.Module):
         self.eval()
         inputs = inputs.to(self.config['device'])
 
-        _, _, bbox_pred, objectness = self.forward(inputs)
+        _, _, _, bbox_pred, objectness = self.forward(inputs)
         B, _, Hf, Wf = objectness.shape
         _, _, H, W = inputs.shape
         scale_x = W / Wf
