@@ -1,0 +1,202 @@
+import os
+
+import torch
+from torch import nn
+from tqdm import tqdm
+
+from utils.common import call_function
+
+
+class FSDT(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.val_batch_nums = None
+        self.train_batch_nums = None
+        self.cfg = cfg
+
+        self.dehaze_name = self.cfg['method']['dehaze']
+        self.detector_name = self.cfg['method']['detector']
+        self.tracker_name = self.cfg['method']['tracker']
+        self.detector_flag = cfg['detector_flag']
+        self.tracker_flag = cfg['tracker_flag']
+        self.freeze_dehaze = cfg['train']['freeze_dehaze']
+        self.pretrain_flag = cfg['train']['pretrain_flag']
+        
+        
+        self.dehaze = call_function(cfg['method']['dehaze'],
+                                    f"models.dehaze.{cfg['method']['dehaze']}")
+
+        self.detector = call_function(cfg['method']['detector'],
+                                    f"models.detector.{cfg['method']['detector']}",cfg)
+
+        self.tracker = call_function(cfg['method']['tracker'],
+                                      f"models.trackers.{cfg['method']['tracker']}", cfg)
+
+    def train_step(self,tra_batch, clean_batch):
+        low_res_images, targets, ignore_list = tra_batch
+        low_res_images = low_res_images.to(self.device)
+        targets_dip, _, _ = clean_batch
+        targets_dip = targets_dip.to(self.device)
+        self.optimizer.zero_grad()
+        if self.cfg['train']['debug']:
+            torch.autograd.set_detect_anomaly(True)
+        if self.detector_flag:
+            dehaze_imgs = self.dehaze(low_res_images)
+            outputs = self.detector(dehaze_imgs)
+            loss_dict = self.detector.loss(outputs, tra_batch)
+            loss_dict['total_loss'].backward()
+        else:
+            loss_dict = self.dehaze.loss(low_res_images, targets_dip)
+            loss_dict['total_loss'].backward()
+        return loss_dict
+
+    def train_epoch(self, train_loader, train_clean_loader, epoch):
+        epoch_losses = {}
+        pbar = tqdm(zip(train_loader, train_clean_loader), total=self.train_batch_nums, desc=f"Epoch {epoch}")
+
+        for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
+            loss_dict = self.train_step(tra_batch, clean_batch)
+
+            # 累加每个 loss 项
+            for key, value in loss_dict.items():
+                if key not in epoch_losses:
+                    epoch_losses[key] = 0.0
+                epoch_losses[key] += value.detach().item()
+
+
+            if batch_idx % self.cfg['train']['log_interval'] == 0:
+                postfix = {k: f'{v:.4f}' for k, v in loss_dict.items()}
+                postfix['Batch'] = f'{batch_idx + 1}/{self.train_batch_nums}'
+                pbar.set_postfix(postfix)
+
+        # 打印每个 loss 项的平均值
+        print(f"Epoch {epoch} 训练完成，平均 Loss:")
+        for key, total in epoch_losses.items():
+            avg = total / self.train_batch_nums
+            print(f"  {key}: {avg:.4f}")
+
+    def train_model(self, train_loader, val_loader, train_clean_loader, val_clean_loader, num_epochs=100):
+        # 训练前预处理
+        self.train_batch_nums = len(train_loader)
+        self.val_batch_nums = len(val_loader)
+        best_loss = float('inf')
+        dehaze_ckpt = f'models/dehaze/{self.dehaze_name}/ckpt'
+        detector_ckpt = f'models/detector/{self.detector_name}/ckpt'
+        if self.cfg['train']['resume_training']:
+            # 检测是否加载成功
+            dehaze_loaded = False
+            detector_loaded = False
+            print("==> 尝试加载模型继续训练 ...")
+            dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', 'pretrain.pth')
+            dehaze_detector_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt',
+                                                 f"{self.detector_name}_pretrain.pth")
+            detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', 'best.pth')
+
+            if os.path.exists(dehaze_ckpt_model):
+                self.dehaze.load_state_dict(torch.load(dehaze_ckpt_model))
+                dehaze_loaded = True
+            elif os.path.exists(dehaze_detector_model):
+                self.detector.load_state_dict(torch.load(dehaze_detector_model))
+                dehaze_loaded = True
+            else:
+                print("未找到预训练去雾模型，重新训练。")
+            if os.path.exists(detector_ckpt_model):
+                self.detector.load_state_dict(torch.load(detector_ckpt_model))
+                detector_loaded = True
+            else:
+                print("未找到已有检测模型，重新训练。")
+            if (dehaze_loaded and detector_loaded) or dehaze_loaded:
+                best_loss = self.evaluate(val_loader)
+
+        if self.freeze_dehaze:
+            for param in self.dehaze.parameters():
+                param.requires_grad = False
+            print("冻结预训练去雾模型")
+        elif self.pretrain_flag:
+            self.detector_flag = False
+
+        for epoch in range(0, num_epochs):
+            # pretrain
+            if not self.freeze_dehaze and epoch > self.cfg['train']['dehaze_epoch'] and self.pretrain_flag:
+                self.detector_flag = True
+                self.freeze_dehaze = True
+                best_loss = float('inf')
+                for param in self.dehaze.parameters():
+                    param.requires_grad = False
+                print("冻结预训练去雾模型")
+
+            self.train_epoch(train_loader, train_clean_loader, epoch)
+
+            # 验证
+            val_loss = self.evaluate(val_loader, val_clean_loader)
+            # 如果检测器效果比历史好
+            if val_loss < best_loss:
+                # 如果此时检测器在训练
+                if self.detector_flag:
+                    best_loss = val_loss
+                    self.save_model(self.detector,detector_ckpt, self.detector_name,f"best.pth")
+                    # 如果同时不冻结去雾模型
+                    if not self.freeze_dehaze:
+                        self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
+                                        f"{self.detector_name}_pretrain.pth")
+                # 此时去雾模块在训练
+                else:
+                    best_loss = val_loss
+                    self.save_model(self.dehaze,dehaze_ckpt, self.dehaze_name,f"pretrain.pth")
+            # 每checkpoint_interval存储一次模型
+            if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
+                self.save_model(self.detector, detector_ckpt, self.detector_name, f"ckpt_epoch_{epoch + 1}.pth")
+
+    @torch.no_grad()
+    def evaluate(self, val_loader, val_clean_loader):
+        self.eval()
+        epoch_losses = {}
+        pbar = tqdm(zip(val_loader, val_clean_loader), total=self.val_batch_nums, desc=f"val")
+        for batch_idx, (val_batch, clean_batch) in enumerate(pbar):
+            low_res_images, targets, ignore_list = val_batch
+            low_res_images = low_res_images.to(self.device)
+            targets_dip, _, _ = clean_batch
+            targets_dip = targets_dip.to(self.device)
+            if self.detector_flag:
+                dehaze_imgs = self.dehaze(low_res_images)
+                outputs = self.detector(dehaze_imgs)
+                loss_dict = self.detector.loss(outputs, val_batch)
+            else:
+                loss_dict = self.dehaze.loss(low_res_images, targets_dip)
+            # 累加每个 loss 项
+            for key, value in loss_dict.items():
+                if key not in epoch_losses:
+                    epoch_losses[key] = 0.0
+                epoch_losses[key] += value.item()
+
+            if batch_idx % self.cfg['train']['log_interval'] == 0:
+                postfix = {k: f'{v:.4f}' for k, v in loss_dict.items()}
+                postfix['Batch'] = f'{batch_idx + 1}/{self.val_batch_nums}'
+                pbar.set_postfix(postfix)
+
+        # 打印每个 loss 项的平均值
+        print(f"验证完成，平均 Loss: {epoch_losses['total_loss']/ self.val_batch_nums:.4f}")
+        for key, total in epoch_losses.items():
+            avg = total / self.val_batch_nums
+            print(f"  {key}: {avg:.4f}")
+            epoch_losses[key] = avg
+        return epoch_losses['total_loss']/ self.val_batch_nums
+
+    def predict(self, x):
+        # 1. 图像去雾
+        x = self.dehaze(x)
+        if self.detector_flag:
+            img = x
+            # 2. 目标检测
+            x = self.detector.predict(x)
+            if self.tracker_flag:
+                # 3. 目标跟踪
+                x = self.tracker.update(x, img, None)
+        return x
+
+    def save_model(self, component, save_path, model_name, save_name):
+        save_dir = os.path.join("", save_path)
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f"{save_name}")
+        torch.save(component.state_dict(), save_path)
+        print(f"{model_name} 模块已保存到: {save_path}")

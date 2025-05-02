@@ -15,6 +15,11 @@ from pathlib import Path # 更方便地处理路径和创建空文件
 import re # 用于从文件名提取帧号
 import traceback # 用于打印完整的错误堆栈
 
+from torchvision import transforms
+
+from .common import call_function
+
+
 class IndexSampler(Sampler):
     def __init__(self, indices):
         super().__init__()
@@ -44,17 +49,15 @@ def custom_collate_fn(batch):
     # 堆叠图像
     images = torch.stack(images, dim=0)
 
-    # 处理标签列表
-    # 假设标签格式有 9 个字段 (frame_index, target_id, bbox_left, ..., object_category)
-    # 使用一个示例的空标签形状 (0, 9)
-    label_format_size = 9 # 根据您的实际标签格式字段数量调整这里
-    labels = [torch.tensor(label, dtype=torch.float32) if label else torch.empty((0, label_format_size), dtype=torch.float32) for label in labels]
+    label_format_size = 9
+    labels = [label.detach().clone().float() if isinstance(label, torch.Tensor)
+              else torch.empty((0, label_format_size),dtype=torch.float32) for label in labels]
 
     # 处理忽略列表 (如果存在)
     if has_ignores and ignores is not None:
-        # 忽略边界框格式与标签格式一致，也假设有 9 个字段
-        ignore_format_size = 9 # 根据您的实际忽略标签格式字段数量调整这里
-        ignores = [torch.tensor(ignore, dtype=torch.float32) if ignore else torch.empty((0, ignore_format_size), dtype=torch.float32) for ignore in ignores]
+        ignore_format_size = 9
+        ignores = [ignores.detach().clone().float() if isinstance(ignores, torch.Tensor)
+                   else torch.empty((0, ignore_format_size), dtype=torch.float32) for ignore in ignores]
         return images, labels, ignores
     else:
         return images, labels
@@ -82,10 +85,10 @@ class UAVOriginalDataset(Dataset):
             img = Image.open(img_path).convert("RGB")
         except FileNotFoundError:
             print(f"错误: 图像文件未找到: {img_path}")
-            img = Image.new('RGB', (224, 224), color='black') # 返回一个黑色图像作为替代
+            img = Image.new('RGB', (224, 224), color='black')
         except Exception as e:
-             print(f"错误: 加载图像文件失败 {img_path}: {e}")
-             img = Image.new('RGB', (224, 224), color='black') # 返回一个黑色图像作为替代
+            print(f"错误: 加载图像文件失败 {img_path}: {e}")
+            img = Image.new('RGB', (224, 224), color='black')
 
         # --- 加载主标签 ---
         label_path = self.label_files[idx]
@@ -94,23 +97,14 @@ class UAVOriginalDataset(Dataset):
             with open(label_path, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'): continue # 跳过空行或注释
+                    if not line or line.startswith('#'): continue
                     try:
-                        # 假设标签格式是 frame_index, target_id, x, y, w, h, out-of-view, occlusion, category, ...
                         fields = list(map(float, line.split(',')))
-                        # 可以选择在这里对字段数量进行更严格的检查，但为了兼容性，只要求至少有必要的字段
-                        # if len(fields) < 9:
-                        #     print(f"警告: 标签文件 {label_path} 中行格式不正确 (字段不足): {line}")
-                        #     continue
                         annotations.append(fields)
-                    except ValueError:
-                        # print(f"警告: 标签文件 {label_path} 中行包含非数字值: {line}")
-                        pass # 跳过包含非数字的行
-                    except IndexError:
-                         # print(f"警告: 标签文件 {label_path} 中行格式不正确 (索引错误): {line}")
-                         pass # 跳过索引错误的行
+                    except (ValueError, IndexError):
+                        pass
 
-        # --- 加载忽略标签 (如果 is_mask 为 True) ---
+        # --- 加载忽略标签 ---
         ignore_annotations = []
         if self.is_mask:
             ignore_path = self.ignore_files[idx]
@@ -118,32 +112,44 @@ class UAVOriginalDataset(Dataset):
                 with open(ignore_path, 'r') as f:
                     for line in f:
                         line = line.strip()
-                        if not line or line.startswith('#'): continue # 跳过空行或注释
+                        if not line or line.startswith('#'): continue
                         try:
-                            # 忽略标签格式与主标签格式一致
                             fields = list(map(float, line.split(',')))
-                            # 同样可以检查字段数量
-                            # if len(fields) < 9:
-                            #     print(f"警告: 忽略文件 {ignore_path} 中行格式不正确 (字段不足): {line}")
-                            #     continue
                             ignore_annotations.append(fields)
-                        except ValueError:
-                            # print(f"警告: 忽略文件 {ignore_path} 中行包含非数字值: {line}")
-                            pass # 跳过包含非数字的行
-                        except IndexError:
-                             # print(f"警告: 忽略文件 {ignore_path} 中行格式不正确 (索引错误): {line}")
-                             pass # 跳过索引错误的行
-            # else:
-            #      print(f"警告: 忽略文件未找到 (is_mask=True): {ignore_path}") # 可能会有很多，酌情开启
+                        except (ValueError, IndexError):
+                            pass
+
+        # === 缩放处理 ===
+        original_w, original_h = img.size
+        new_w, new_h = 640, 320
+        scale_factor_w = new_w / original_w
+        scale_factor_h = new_h / original_h
+
+        img = transforms.functional.resize(img, (new_h, new_w))
+
+        if annotations:
+            annotations = torch.tensor(annotations, dtype=torch.float32)
+            annotations[:, 2] *= scale_factor_w
+            annotations[:, 3] *= scale_factor_h
+            annotations[:, 4] *= scale_factor_w
+            annotations[:, 5] *= scale_factor_h
+        else:
+            annotations = torch.empty((0, 6), dtype=torch.float32)  # 假设6列
+
+        if self.is_mask:
+            if ignore_annotations:
+                ignore_annotations = torch.tensor(ignore_annotations, dtype=torch.float32)
+                ignore_annotations[:, 2] *= scale_factor_w
+                ignore_annotations[:, 3] *= scale_factor_h
+                ignore_annotations[:, 4] *= scale_factor_w
+                ignore_annotations[:, 5] *= scale_factor_h
+            else:
+                ignore_annotations = torch.empty((0, annotations.shape[1]), dtype=torch.float32)
 
         if self.transform:
             img = self.transform(img)
 
-        # 根据 is_mask 返回不同的结果
-        if self.is_mask:
-            return img, annotations, ignore_annotations
-        else:
-            return img, annotations
+        return (img, annotations, ignore_annotations) if self.is_mask else (img, annotations)
 
 
 # UAVDataLoaderBuilder 需要修改以加载所有忽略数据并生成帧级忽略文件 (格式与标签相同)
@@ -159,8 +165,7 @@ class UAVDataLoaderBuilder:
         """
         self.seed = config['seed']
         self.root = config['dataset']['path']
-        self.haze_method = config.get('haze_method', "None")
-        self.dehaze_method = config.get('dehaze_method', "None")
+        self.haze_method = config['method']['haze']
         self.is_mask = config['dataset']['is_mask'] # 保留这个配置，用于控制是否加载和返回忽略信息
         self.is_clean = config['dataset'].get('is_clean', False) # 默认为 False
         self.fog_strength = config['dataset'].get('fog_strength', 0.5) # 默认为 0.5
@@ -176,7 +181,7 @@ class UAVDataLoaderBuilder:
         print(f"  原始图像根目录: {self.original_image_root}")
         print(f"  标签根目录: {self.label_root}")
         print(f"  是否加载忽略信息 (is_mask): {self.is_mask}")
-        print(f"  雾化方法: {self.haze_method}, 去雾方法: {self.dehaze_method}, 雾强度: {self.fog_strength}")
+        print(f"  雾化方法: {self.haze_method},  雾强度: {self.fog_strength}")
 
         # --- 加载所有忽略边界框数据到帧级映射 ---
         # 这段数据用于后续生成帧级忽略文件，现在存储原始行字符串
@@ -261,43 +266,8 @@ class UAVDataLoaderBuilder:
         if self.haze_method != "None":
             print(f"尝试应用雾化方法 '{self.haze_method}'...")
             # 传递雾强度参数给处理函数
-            path = self.call_processing_function(path, self.haze_method, 'haze', self.fog_strength)
-        # 如果需要去雾处理，可以在这里添加类似的逻辑
-        # if self.dehaze_method != "None":
-        #     print(f"尝试应用去雾方法 '{self.dehaze_method}'...")
-        #     path = self.call_processing_function(path, self.dehaze_method, 'dehaze')
+            path = call_function(self.haze_method, 'models.haze', path, self.fog_strength)
         return path
-
-    def call_processing_function(self, input_path, method_name, module_prefix, *args):
-        """Dynamically imports and calls a processing function."""
-        try:
-            module_name = f'{module_prefix}.{method_name}'
-            spec = importlib.util.find_spec(module_name)
-            if spec is None:
-                 print(f"错误: 模块 '{module_name}' 未找到。")
-                 return input_path
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module # Add to sys.modules before exec
-            spec.loader.exec_module(module)
-
-            if not hasattr(module, method_name):
-                 print(f"错误: 函数 '{method_name}' 在模块 '{module_name}' 中未找到。")
-                 return input_path
-            func = getattr(module, method_name) # Get the function
-
-            print(f"从 {module_prefix} 模块应用 {method_name} 处理到路径: {input_path}")
-            # 调用函数，将输入路径和额外参数传递进去
-            output_path = func(input_path, *args) # Pass input_path and any extra args
-            if output_path is None:
-                 print(f"警告: 处理函数 {module_name}.{method_name} 未返回路径。使用原始路径: {input_path}")
-                 return input_path
-            print(f"处理函数返回路径: {output_path}")
-            return output_path
-        except Exception as e:
-            print(f"错误: 在 {method_name} 处理 ({module_prefix}) 过程中出错: {e}")
-            import traceback
-            traceback.print_exc()
-            return input_path
 
     # parse_labels_to_frames 保持不变，用于主标签
     def parse_labels_to_frames(self, label_file):

@@ -51,14 +51,15 @@ class DITOL(nn.Module):
 
     def forward(self, input):
         dehazed, t_map = self.falcon(input)  # 正确解包
-        features = self.backbone(dehazed)  # 只将 dehazed 图像送入 ConvNeXt
-
-        loc_features = self.localization_head(features)
-        bbox_pred = self.bbox_regression(loc_features)
-        objectness = self.objectness_score(loc_features).sigmoid()
-
-
-        return dehazed, t_map, features, bbox_pred, objectness
+        # features = self.backbone(dehazed)  # 只将 dehazed 图像送入 ConvNeXt
+        #
+        # loc_features = self.localization_head(features)
+        # bbox_pred = self.bbox_regression(loc_features)
+        # objectness = self.objectness_score(loc_features).sigmoid()
+        #
+        #
+        # return dehazed, t_map, features, bbox_pred, objectness
+        return dehazed, t_map
 
     def train_step(self, tra_batch, clean_batch):
         self.optimizer.zero_grad()
@@ -209,43 +210,47 @@ class DITOL(nn.Module):
 
         results = []
         for b in range(B):
-            obj = objectness[b, 0]
-            box = bbox_pred[b]
-            boxes, scores = [], []
-
-            for i in range(Hf):
-                for j in range(Wf):
-                    score = obj[i, j].item()
-                    if score < conf_thresh:
-                        continue
-                    dx, dy, w, h = box[:, i, j].tolist()
-                    coords = self.compute_box_coordinates(dx, dy, w, h, j, i, scale_x, scale_y)
-                    boxes.append(coords)
-                    scores.append(score)
-
-            if not boxes:
+            # 提取当前样本的 objectness 和 bbox
+            obj_map = objectness[b, 0]  # (Hf, Wf)
+            keep_mask = obj_map > conf_thresh
+            if keep_mask.sum() == 0:
                 results.append([])
                 continue
 
-            boxes_tensor = torch.tensor(boxes, device=self.config['device'])
-            scores_tensor = torch.tensor(scores, device=self.config['device'])
-            keep = self.nms(boxes_tensor, scores_tensor, iou_thresh)
-            boxes_tensor = boxes_tensor[keep]
-            scores_tensor = scores_tensor[keep]
+            # 提取满足条件的索引
+            indices = keep_mask.nonzero(as_tuple=False)
+            i_coords = indices[:, 0]
+            j_coords = indices[:, 1]
 
+            # 取出对应位置的 bbox
+            boxes = bbox_pred[b][:, i_coords, j_coords]  # shape (4, N)
+            boxes = boxes.permute(1, 0)  # (N, 4)
+
+            # 还原到原图尺度
+            boxes[:, [0, 2]] *= scale_x  # x1, x2
+            boxes[:, [1, 3]] *= scale_y  # y1, y2
+
+            scores = obj_map[i_coords, j_coords]  # shape (N,)
+
+            # NMS
+            keep = self.nms(boxes, scores, iou_thresh)
+            boxes = boxes[keep]
+            scores = scores[keep]
+
+            # 可选：忽略区域过滤
             if ignore and ignore[b]:
                 final_keep = []
-                for idx in range(len(boxes_tensor)):
-                    bx1, by1, bx2, by2 = boxes_tensor[idx].tolist()
+                for idx in range(len(boxes)):
+                    bx1, by1, bx2, by2 = boxes[idx].tolist()
                     overlap = any(self.compute_iou([bx1, by1, bx2, by2],
-                                                   [ig[2], ig[3], ig[2] + ig[4], ig[3] + ig[5]]) > 0.5 for ig in
-                                  ignore[b])
+                                                   [ig[2], ig[3], ig[2] + ig[4], ig[3] + ig[5]]) > 0.5
+                                  for ig in ignore[b])
                     if not overlap:
                         final_keep.append(idx)
-                boxes_tensor = boxes_tensor[final_keep]
-                scores_tensor = scores_tensor[final_keep]
+                boxes = boxes[final_keep]
+                scores = scores[final_keep]
 
-            batch_result = [[*boxes_tensor[i].tolist(), scores_tensor[i].item()] for i in range(len(boxes_tensor))]
+            batch_result = [[*boxes[i].tolist(), scores[i].item()] for i in range(len(boxes))]
             results.append(batch_result)
 
         return results

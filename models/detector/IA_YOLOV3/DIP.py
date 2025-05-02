@@ -1,7 +1,6 @@
-import torch
 import torch.nn as nn
 
-from models.IA_YOLOV3.filters import DefogFilter, ImprovedWhiteBalanceFilter, GammaFilter, ToneFilter, ContrastFilter, \
+from models.detector.IA_YOLOV3.filters import DefogFilter, ImprovedWhiteBalanceFilter, GammaFilter, ToneFilter, ContrastFilter, \
     UsmFilter
 
 

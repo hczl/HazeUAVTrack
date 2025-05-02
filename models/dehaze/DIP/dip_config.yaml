@@ -1,0 +1,7 @@
+curve_steps: 8
+dip_nums: 15  # 7 + curve_steps
+defog_range: [0.1, 1.0]
+gamma_range: 3
+tone_curve_range: [0.5, 2]
+usm_range: [0.0, 5]
+warmup_epochs: 0

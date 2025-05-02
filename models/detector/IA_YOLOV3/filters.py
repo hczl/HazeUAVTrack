@@ -178,4 +178,5 @@ class UsmFilter(nn.Module):
         output = torch.cat(outputs, dim=1)
         # This operation creates a new tensor, so it's not inplace
         img_out = (img - output) * param[:, None, None, None] + img
-        return img_out
+        return torch.clamp(img_out, 0.0, 1.0)
+

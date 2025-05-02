@@ -273,15 +273,29 @@ class IA_YOLOV3(nn.Module):
             'avg_yolov3_loss': avg_yolov3_loss
         }
 
-    def predict(self, high_res_images):
+    def predict(self, high_res_images, conf_thresh=0.95):  # 添加阈值参数
         self.yolov3.eval()
         self.cnn_pp.eval()
         self.dip_module.eval()
         high_res_images = high_res_images.to(self.device)
         with torch.no_grad():
             dip_processed_output = self(high_res_images, detach_dip=True)
-            results = self.yolov3_wrapper.predict(dip_processed_output)
-        return results
+            results = self.yolov3_wrapper.predict(dip_processed_output, verbose=False)
+
+        all_boxes = []
+        for result in results:
+            boxes = result.boxes.xyxy  # (N, 4)
+            scores = result.boxes.conf  # (N,)
+            # 进行置信度筛选
+            mask = scores > conf_thresh
+            boxes = boxes[mask]
+            scores = scores[mask]
+
+            # 拼接 boxes 和 scores
+            boxes_with_scores = torch.cat([boxes, scores.unsqueeze(1)], dim=1)  # (N, 5)
+            all_boxes.append(boxes_with_scores.cpu().numpy())
+
+        return all_boxes
 
     def calculate_dip_loss(self, dip_output, targets_dip):
         criterion = nn.MSELoss()
