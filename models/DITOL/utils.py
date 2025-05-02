@@ -1,10 +1,29 @@
 import math
 
 import torch
+from torch import nn
 from torchvision import transforms
+from torchvision.ops import generalized_box_iou
 
 
 def process_batch(batch):
+    """
+        处理输入 batch 图像与目标框，执行：
+        - 图像缩放；
+        - 目标框与 ignore 框按比例缩放；
+        - 转换为张量格式以供模型使用。
+
+        输入：
+            batch: 一个三元组 (images, targets, ignores)
+                - images: List[Tensor], 原始图像
+                - targets: List[Tensor], 每张图像对应的目标框，格式为 [N, 6]
+                - ignores: List[Tensor], 可选的忽略区域框，格式为 [M, 6]
+
+        输出：
+            processed_images_tensor: Tensor, [B, 3, new_h, new_w]
+            processed_targets: List[Tensor], 每张图像的缩放后目标框
+            processed_ignores: List[Tensor], 每张图像的缩放后 ignore 区域
+    """
     processed_images = []
     processed_targets = []
     processed_ignores = []
@@ -50,10 +69,21 @@ def process_batch(batch):
 
 def build_detection_targets(bboxes, image_size, feature_size, ignore_regions=None):
     """
-    bboxes: Tensor of shape [N, 6] (left, top, width, height, ...)
-    image_size: (H, W)
-    feature_size: (H', W')
-    ignore_regions: Tensor of shape [M, 6] if provided
+    构建用于训练的目标标签张量，包括：
+    - objectness mask；
+    - 边框回归值；
+    - ignore mask。
+
+    输入：
+        bboxes: Tensor [N, 6]，每行为一个真实框，格式中第3-6列为左上坐标及宽高
+        image_size: Tuple[int, int] 原图大小 (H, W)
+        feature_size: Tuple[int, int] 特征图大小 (Hf, Wf)
+        ignore_regions: Tensor [M, 6], 可选的忽略区域
+
+    输出：
+        gt_obj: Tensor [1, Hf, Wf]，每个位置是否为中心点（硬标签）
+        gt_box: Tensor [4, Hf, Wf]，每个位置的边框回归目标（dx, dy, w, h）
+        ignore_mask: Tensor [1, Hf, Wf]，标记哪些位置属于 ignore 区域
     """
     H, W = image_size
     Hf, Wf = feature_size
@@ -91,5 +121,71 @@ def build_detection_targets(bboxes, image_size, feature_size, ignore_regions=Non
 
     return gt_obj, gt_box, ignore_mask
 
+class GIoULoss(nn.Module):
+    """
+       广义 IoU 损失函数（Generalized IoU Loss），用于计算预测框与真实框之间的空间重叠程度。
+
+       使用：
+           输入：
+               pred_boxes: Tensor [N, 4]，预测框坐标，格式为 (x1, y1, x2, y2)
+               target_boxes: Tensor [N, 4]，真实框坐标
+           输出：
+               Tensor: 标量，平均 GIoU 损失
+    """
+    def __init__(self):
+        super(GIoULoss, self).__init__()
+
+    def forward(self, pred_boxes, target_boxes):
+        '''
+        pred_boxes and target_boxes: [N, 4] in (x1, y1, x2, y2) format
+        '''
+        ious = generalized_box_iou(pred_boxes, target_boxes)  # [N, N]
+        loss = 1 - torch.diag(ious)  # assume paired boxes
+        return loss.mean()
+
+
+def generate_soft_target(cx, cy, Hf, Wf, sigma=1.0, device='cpu'):
+    """
+    在特征图上以 (cx, cy) 为中心生成一个二维高斯热图，作为 objectness 的软标签。
+
+    输入：
+        cx, cy: 中心点坐标（float，特征图尺度）
+        Hf, Wf: 特征图高度、宽度
+        sigma: 高斯标准差，控制热图扩散范围
+        device: 指定 tensor 的计算设备
+
+    输出：
+        heatmap: Tensor [1, Hf, Wf]，值在 (0,1) 间，中心值最大
+    """
+    x_grid = torch.arange(Wf, device=device).float()
+    y_grid = torch.arange(Hf, device=device).float()
+    yy, xx = torch.meshgrid(y_grid, x_grid, indexing='ij')
+    dist_sq = (xx - cx)**2 + (yy - cy)**2
+    heatmap = torch.exp(-dist_sq / (2 * sigma**2))
+    return heatmap.unsqueeze(0)  # shape [1, Hf, Wf]
+
+
+def center_sampling_mask(cx, cy, w, h, Hf, Wf, radius=0.25, device='cpu'):
+    """
+    生成一个矩形的二值掩码，表示以 (cx, cy) 为中心、以 (w, h) 为参考大小的采样区域，
+    用于限制 soft target 的范围，提高训练稳定性。
+
+    输入：
+        cx, cy: 中心坐标（float，特征图尺度）
+        w, h: 目标宽高（float，特征图尺度）
+        Hf, Wf: 特征图大小
+        radius: 采样区域相对目标宽高的比例（默认 0.25）
+        device: tensor 所在设备
+
+    输出：
+        mask: Tensor [1, Hf, Wf]，值为 0 或 1，标记采样区域
+    """
+    x_grid = torch.arange(Wf, device=device).float()
+    y_grid = torch.arange(Hf, device=device).float()
+    yy, xx = torch.meshgrid(y_grid, x_grid, indexing='ij')
+    dist_x = (xx - cx).abs()
+    dist_y = (yy - cy).abs()
+    mask = (dist_x < radius * w) & (dist_y < radius * h)
+    return mask.float().unsqueeze(0)
 
 

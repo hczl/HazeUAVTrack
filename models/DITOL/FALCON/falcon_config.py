@@ -1,6 +1,6 @@
 class Settings:
     """
-    DITOL 模型设置类
+    FALCON 模型设置类
     """
 
     def __init__(self):
