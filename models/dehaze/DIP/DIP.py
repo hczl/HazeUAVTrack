@@ -64,7 +64,7 @@ class DIP(nn.Module):
         dip_output = self.DIP_module(inputs, filter_features, defog_A, IcA)
         return dip_output
 
-    def loss(self, haze_img, clean_img):
+    def forward_loss(self, haze_img, clean_img):
         dehaze_img = self(haze_img)
         loss = self.criterion(dehaze_img, clean_img)
         return {

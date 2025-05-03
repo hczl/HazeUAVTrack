@@ -1,35 +1,36 @@
 # gpu设置
 device: "cuda"
 
-#模型是否启用检测器
-detector_flag: True
-
-#模型是否启用追踪器
-tracker_flag: False
-
 # 模型选择
 method:
   # 生成雾方法，可选: None, MiDaS_Deep
   haze: "MiDaS_Deep"
 
-  # 去雾方法，可选: None, DIP, DENET, FALCON
-  dehaze: "FALCON"
+  # 去雾方法，可选: NONE, DIP, DENET, FALCON
+  dehaze: "NONE"
 
-  # 检测器，可选: YOLOV3, DITOL
-  detector: "DITOL"
+  # 检测器，可选: YOLOV3, DE_NET, DITOL
+  detector: "YOLOV3"
 
   # 跟踪算法，可选: SORT
   tracker: "tracker"
 
-conf_threshold: 0.4
+#模型是否启用检测器
+detector_flag: False
+
+#模型是否启用追踪器
+tracker_flag: False
+
+# 检测与跟踪参数
+confidence_threshold: 0.4
 iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
-  fog_strength: 0.75
+  fog_strength: 0.85
   train_ratio: 0.05
   val_ratio: 0.05
-  batch: 8
+  batch: 32
   is_mask: True
   path: "./data/UAV-M"
   data_path: "UAV-benchmark-M"
@@ -54,10 +55,10 @@ train:
   debug: False
 
   # epochs
-  epochs: 80
+  epochs: 5
 
   # 是否恢复训练
-  resume_training: False
+  resume_training: True
 
   # 学习率设置
   lr: 0.001

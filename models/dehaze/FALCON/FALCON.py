@@ -97,7 +97,7 @@ class FALCON(nn.Module):
         t_haze = w * self.ddp(logits)
         return logits, t_haze
 
-    def loss(self, haze_img, clean_img):
+    def forward_loss(self, haze_img, clean_img):
         dehaze_img, t_map = self(haze_img,trainable=False)
         t_gt = make_dark_channel_tensor(clean_img)
         loss_img = self.mse(dehaze_img, clean_img)

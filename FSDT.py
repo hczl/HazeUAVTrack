@@ -35,18 +35,17 @@ class FSDT(nn.Module):
     def train_step(self,tra_batch, clean_batch):
         low_res_images, targets, ignore_list = tra_batch
         low_res_images = low_res_images.to(self.device)
-        targets_dip, _, _ = clean_batch
-        targets_dip = targets_dip.to(self.device)
+        targets_img, _, _ = clean_batch
+        targets_img = targets_img.to(self.device)
         self.optimizer.zero_grad()
         if self.cfg['train']['debug']:
             torch.autograd.set_detect_anomaly(True)
         if self.detector_flag:
             dehaze_imgs = self.dehaze(low_res_images)
-            outputs = self.detector(dehaze_imgs)
-            loss_dict = self.detector.loss(outputs, tra_batch)
+            loss_dict = self.detector.forward_loss(dehaze_imgs, targets, ignore_list)
             loss_dict['total_loss'].backward()
         else:
-            loss_dict = self.dehaze.loss(low_res_images, targets_dip)
+            loss_dict = self.dehaze.forward_loss(low_res_images, targets_img)
             loss_dict['total_loss'].backward()
         return loss_dict
 
@@ -65,7 +64,16 @@ class FSDT(nn.Module):
 
 
             if batch_idx % self.cfg['train']['log_interval'] == 0:
-                postfix = {k: f'{v:.4f}' for k, v in loss_dict.items()}
+                postfix = {}
+                for k, v in loss_dict.items():
+                    try:
+                        # 如果是 Tensor 且是标量，提取数值
+                        if isinstance(v, torch.Tensor) and v.dim() == 0:
+                            postfix[k] = f'{v.item():.4f}'
+                        else:
+                            postfix[k] = str(v)
+                    except Exception as e:
+                        postfix[k] = f'ERR({e})'
                 postfix['Batch'] = f'{batch_idx + 1}/{self.train_batch_nums}'
                 pbar.set_postfix(postfix)
 
@@ -82,6 +90,23 @@ class FSDT(nn.Module):
         best_loss = float('inf')
         dehaze_ckpt = f'models/dehaze/{self.dehaze_name}/ckpt'
         detector_ckpt = f'models/detector/{self.detector_name}/ckpt'
+        combo_ckpt_model = os.path.join(
+            f'models/dehaze/{self.dehaze_name}/ckpt',
+            f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_0.pth"
+        )
+        if os.path.exists(combo_ckpt_model):
+            print(f"==> 加载组合模型权重：{combo_ckpt_model}")
+            self.dehaze.load_state_dict(torch.load(combo_ckpt_model, map_location=self.device))
+            detector_combo_ckpt = os.path.join(
+                f'models/detector/{self.detector_name}/ckpt',
+                f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_0.pth"
+            )
+            if os.path.exists(detector_combo_ckpt):
+                self.detector.load_state_dict(torch.load(detector_combo_ckpt, map_location=self.device))
+                print(f"==> 加载检测器组合模型权重：{detector_combo_ckpt}")
+            else:
+                print("==> 未找到检测器组合模型，仅加载去雾模型")
+
         if self.cfg['train']['resume_training']:
             # 检测是否加载成功
             dehaze_loaded = False
@@ -106,7 +131,7 @@ class FSDT(nn.Module):
             else:
                 print("未找到已有检测模型，重新训练。")
             if (dehaze_loaded and detector_loaded) or dehaze_loaded:
-                best_loss = self.evaluate(val_loader)
+                best_loss = self.evaluate(val_loader, val_clean_loader)
 
         if self.freeze_dehaze:
             for param in self.dehaze.parameters():
@@ -145,7 +170,11 @@ class FSDT(nn.Module):
                     self.save_model(self.dehaze,dehaze_ckpt, self.dehaze_name,f"pretrain.pth")
             # 每checkpoint_interval存储一次模型
             if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
-                self.save_model(self.detector, detector_ckpt, self.detector_name, f"ckpt_epoch_{epoch + 1}.pth")
+                self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
+                                f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
+                self.   save_model(self.detector, detector_ckpt, self.detector_name,
+                                f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
+
 
     @torch.no_grad()
     def evaluate(self, val_loader, val_clean_loader):
@@ -155,14 +184,13 @@ class FSDT(nn.Module):
         for batch_idx, (val_batch, clean_batch) in enumerate(pbar):
             low_res_images, targets, ignore_list = val_batch
             low_res_images = low_res_images.to(self.device)
-            targets_dip, _, _ = clean_batch
-            targets_dip = targets_dip.to(self.device)
+            targets_img, _, _ = clean_batch
+            targets_img = targets_img.to(self.device)
             if self.detector_flag:
                 dehaze_imgs = self.dehaze(low_res_images)
-                outputs = self.detector(dehaze_imgs)
-                loss_dict = self.detector.loss(outputs, val_batch)
+                loss_dict = self.detector.forward_loss(dehaze_imgs, targets, ignore_list)
             else:
-                loss_dict = self.dehaze.loss(low_res_images, targets_dip)
+                loss_dict = self.dehaze.forward_loss(low_res_images, targets_img)
             # 累加每个 loss 项
             for key, value in loss_dict.items():
                 if key not in epoch_losses:
@@ -170,8 +198,17 @@ class FSDT(nn.Module):
                 epoch_losses[key] += value.item()
 
             if batch_idx % self.cfg['train']['log_interval'] == 0:
-                postfix = {k: f'{v:.4f}' for k, v in loss_dict.items()}
-                postfix['Batch'] = f'{batch_idx + 1}/{self.val_batch_nums}'
+                postfix = {}
+                for k, v in loss_dict.items():
+                    try:
+                        # 如果是 Tensor 且是标量，提取数值
+                        if isinstance(v, torch.Tensor) and v.dim() == 0:
+                            postfix[k] = f'{v.item():.4f}'
+                        else:
+                            postfix[k] = str(v)
+                    except Exception as e:
+                        postfix[k] = f'ERR({e})'
+                postfix['Batch'] = f'{batch_idx + 1}/{self.train_batch_nums}'
                 pbar.set_postfix(postfix)
 
         # 打印每个 loss 项的平均值
@@ -188,7 +225,7 @@ class FSDT(nn.Module):
         if self.detector_flag:
             img = x
             # 2. 目标检测
-            x = self.detector.predict(x)
+            x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'])
             if self.tracker_flag:
                 # 3. 目标跟踪
                 x = self.tracker.update(x, img, None)
@@ -200,3 +237,22 @@ class FSDT(nn.Module):
         save_path = os.path.join(save_dir, f"{save_name}")
         torch.save(component.state_dict(), save_path)
         print(f"{model_name} 模块已保存到: {save_path}")
+
+    def load_model(self):
+        print("==> 尝试加载模型继续训练 ...")
+        dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', 'pretrain.pth')
+        dehaze_detector_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt',
+                                             f"{self.detector_name}_pretrain.pth")
+        detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', 'best.pth')
+
+        if os.path.exists(dehaze_ckpt_model) and not self.detector_flag:
+            self.dehaze.load_state_dict(torch.load(dehaze_ckpt_model))
+            print('去雾模型加载成功')
+        elif self.detector_flag:
+            if os.path.exists(dehaze_detector_model):
+                self.dehaze.load_state_dict(torch.load(dehaze_detector_model))
+                print('去雾_检测模型加载成功')
+            if os.path.exists(detector_ckpt_model):
+                self.detector.load_state_dict(torch.load(detector_ckpt_model))
+                print('检测模型加载成功')
+

@@ -1,6 +1,12 @@
 # gpu设置
 device: "cuda"
 
+#模型是否启用检测器
+detector_flag: False
+
+#模型是否启用追踪器
+tracker_flag: False
+
 # 模型选择
 method:
   # 生成雾方法，可选: None, MiDaS_Deep
@@ -9,17 +15,12 @@ method:
   # 去雾方法，可选: None, DIP, DENET, FALCON
   dehaze: "DENET"
 
-  # 检测器，可选: YOLOV3, DE_NET, DITOL
+  # 检测器，可选: YOLOV3, DITOL
   detector: "YOLOV3"
 
   # 跟踪算法，可选: SORT
   tracker: "tracker"
 
-#模型是否启用检测器
-detector_flag: False
-
-#模型是否启用追踪器
-tracker_flag: False
 
 # 检测与跟踪参数
 confidence_threshold: 0.4
@@ -27,7 +28,7 @@ iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
-  fog_strength: 0.75
+  fog_strength: 0.85
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 32
@@ -58,7 +59,7 @@ train:
   epochs: 5
 
   # 是否恢复训练
-  resume_training: False
+  resume_training: True
 
   # 学习率设置
   lr: 0.001
@@ -67,7 +68,7 @@ train:
   freeze_dehaze: False
 
   # 是否在模型中先训练去雾模型，后训练检测器
-  pretrain_flag: True
+  pretrain_flag: False
 
   # 去雾模型先训练epoch
   dehaze_epoch: 5

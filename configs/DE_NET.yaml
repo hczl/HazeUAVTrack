@@ -13,14 +13,15 @@ method:
   haze: "MiDaS_Deep"
 
   # 去雾方法，可选: None, DIP, DENET, FALCON
-  dehaze: "FALCON"
+  dehaze: "DENET"
 
-  # 检测器，可选: YOLOV3, DITOL
-  detector: "DITOL"
+  # 检测器，可选: YOLOV3,  DITOL
+  detector: "YOLOV3"
 
   # 跟踪算法，可选: SORT
   tracker: "tracker"
 
+# 检测与跟踪参数
 conf_threshold: 0.4
 iou_threshold: 0.5
 

@@ -189,3 +189,36 @@ def center_sampling_mask(cx, cy, w, h, Hf, Wf, radius=0.25, device='cpu'):
     return mask.float().unsqueeze(0)
 
 
+def compute_iou(box1, box2):
+    """
+    Compute Intersection over Union (IoU) between two boxes.
+    Boxes must be in [x1, y1, x2, y2] format.
+    """
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+
+    inter_w = max(0, x2 - x1)
+    inter_h = max(0, y2 - y1)
+    inter_area = inter_w * inter_h
+
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union_area = area1 + area2 - inter_area
+
+    if union_area <= 0:
+        return 0.0
+    else:
+        return inter_area / union_area
+
+def compute_box_coordinates(dx, dy, w, h, j, i_, scale_x, scale_y):
+    cx = (j + dx) * scale_x
+    cy = (i_ + dy) * scale_y
+    bw = w * scale_x
+    bh = h * scale_y
+    x1 = cx - bw / 2
+    y1 = cy - bh / 2
+    x2 = cx + bw / 2
+    y2 = cy + bh / 2
+    return [x1, y1, x2, y2]
