@@ -15,7 +15,7 @@ method:
   # 去雾方法，可选: None, DIP, DENET, FALCON
   dehaze: "DIP"
 
-  # 检测器，可选: YOLOV3, DE_NET, DITOL
+  # 检测器，可选: YOLOV3, DITOL
   detector: "YOLOV3"
 
   # 跟踪算法，可选: SORT
@@ -28,8 +28,8 @@ iou_threshold: 0.5
 # 数据集路径与设置
 dataset:
   fog_strength: 0.75
-  train_ratio: 0.05
-  val_ratio: 0.05
+  train_ratio: 0.8
+  val_ratio: 0.1
   batch: 8
   is_mask: True
   path: "./data/UAV-M"
@@ -64,7 +64,7 @@ train:
   lr: 0.001
 
   # 是否冻结去雾模型
-  freeze_dehaze: False
+  freeze_dehaze: True
 
   # 是否在模型中先训练去雾模型，后训练检测器
   pretrain_flag: False

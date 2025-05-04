@@ -165,15 +165,17 @@ class FSDT(nn.Module):
                         self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
                                         f"{self.detector_name}_pretrain.pth")
                 # 此时去雾模块在训练
-                else:
+                elif not self.freeze_dehaze:
                     best_loss = val_loss
                     self.save_model(self.dehaze,dehaze_ckpt, self.dehaze_name,f"pretrain.pth")
             # 每checkpoint_interval存储一次模型
             if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
-                self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
+                self.save_model(self.detector, detector_ckpt, self.detector_name,
                                 f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
-                self.   save_model(self.detector, detector_ckpt, self.detector_name,
-                                f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
+                if not self.freeze_dehaze:
+                    self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
+                                    f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
+
 
 
     @torch.no_grad()

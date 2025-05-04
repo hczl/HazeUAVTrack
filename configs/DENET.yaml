@@ -21,7 +21,6 @@ method:
   # 跟踪算法，可选: SORT
   tracker: "tracker"
 
-
 # 检测与跟踪参数
 confidence_threshold: 0.4
 iou_threshold: 0.5
