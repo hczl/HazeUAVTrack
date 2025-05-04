@@ -2,7 +2,7 @@
 device: "cuda"
 
 #模型是否启用检测器
-detector_flag: True
+detector_flag: False
 
 #模型是否启用追踪器
 tracker_flag: False
@@ -12,11 +12,11 @@ method:
   # 生成雾方法，可选: None, MiDaS_Deep
   haze: "MiDaS_Deep"
 
-  # 去雾方法，可选: None, DIP, DENET, FALCON
-  dehaze: "FALCON"
+  # 去雾方法，可选: None, DIP, DENET, FALCON, AOD_NET, BDN
+  dehaze: "BDN"
 
   # 检测器，可选: YOLOV3, DITOL
-  detector: "DITOL"
+  detector: "YOLOV3"
 
   # 跟踪算法，可选: SORT
   tracker: "tracker"
@@ -55,16 +55,16 @@ train:
   debug: False
 
   # epochs
-  epochs: 80
+  epochs: 5
 
   # 是否恢复训练
-  resume_training: False
+  resume_training: True
 
   # 学习率设置
   lr: 0.001
 
   # 是否冻结去雾模型
-  freeze_dehaze: True
+  freeze_dehaze: False
 
   # 是否在模型中先训练去雾模型，后训练检测器
   pretrain_flag: False

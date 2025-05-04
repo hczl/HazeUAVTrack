@@ -27,7 +27,7 @@ iou_threshold: 0.5
 
 # 数据集路径与设置
 dataset:
-  fog_strength: 0.75
+  fog_strength: 0.85
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 8
