@@ -29,7 +29,41 @@ class AttentionGuidedStem(nn.Module):
 
     def forward(self, x):
         return self.stem(x)
+class KernelAttentionBlur(nn.Module):
+    def __init__(self, in_channels, num_kernels=3):
+        super().__init__()
+        self.num_kernels = num_kernels
+        kernel_sizes = [3, 5, 7][:num_kernels]
 
+        # 多尺度模糊卷积（depthwise）
+        self.branches = nn.ModuleList([
+            nn.Conv2d(in_channels, in_channels, kernel_size=k, padding=k//2, groups=in_channels, bias=False)
+            for k in kernel_sizes
+        ])
+
+        # 通道注意力融合
+        self.attention_conv = nn.Sequential(
+            nn.Conv2d(in_channels * num_kernels, in_channels, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels, num_kernels, kernel_size=1),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, x):
+        # 分支卷积输出堆叠: (B, num_kernels, C, H, W)
+        branch_outputs = [branch(x) for branch in self.branches]
+        stacked = torch.stack(branch_outputs, dim=1)
+
+        B, N, C, H, W = stacked.shape
+        combined = stacked.view(B, N * C, H, W)
+
+        # 注意力权重生成: (B, N, H, W)
+        attn_weights = self.attention_conv(combined)
+        attn_weights = attn_weights.unsqueeze(2)  # (B, N, 1, H, W)
+
+        # 加权融合模糊特征
+        weighted = (stacked * attn_weights).sum(dim=1)  # (B, C, H, W)
+        return weighted
 class PositionalEncoder(nn.Module):
     def __init__(self, in_channels, hidden_channels):
         super().__init__()
@@ -124,7 +158,7 @@ class TDN(nn.Module):
         nums_deque_p = nums_p_channels + (self.hist_len - 1) * (nums_p_channels // self.hist_len)
 
         hidden_channels = model_cfg_dict.get('hidden_channels', 128)
-
+        self.blur_attn = KernelAttentionBlur(in_channels=192)
         self.pos_enc = PositionalEncoder(3, nums_p_channels)
         self.backbone = ConvNeXtBackbone()
 
@@ -144,6 +178,8 @@ class TDN(nn.Module):
         B, _, H_img, W_img = x.shape
 
         f_t = self.backbone(x)
+        f_t = self.blur_attn(f_t)
+
         _, C_f, H_f, W_f = f_t.shape
 
         p_t_full_res = self.pos_enc(x)
