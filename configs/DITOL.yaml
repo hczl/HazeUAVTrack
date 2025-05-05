@@ -1,74 +1,49 @@
 # gpu设置
-device: "cuda"
-
-#模型是否启用检测器
-detector_flag: True
-
-#模型是否启用追踪器
-tracker_flag: False
-
+device: cuda
+# 模型是否启用检测器
+detector_flag: true
+# 模型是否启用追踪器
+tracker_flag: false
 # 模型选择
 method:
-  # 生成雾方法，可选: None, MiDaS_Deep
-  haze: "MiDaS_Deep"
-
-  # 去雾方法，可选: None, DIP, DENET, FALCON
-  dehaze: "FALCON"
-
-  # 检测器，可选: YOLOV3, DITOL
-  detector: "DITOL"
-
-  # 跟踪算法，可选: SORT
-  tracker: "tracker"
-
+# 生成雾方法，可选: None, MiDaS_Deep
+  haze: MiDaS_Deep
+# 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
+  dehaze: FALCON
+# 检测器，可选: YOLOV3,  DITOL
+  detector: DITOL
+# 跟踪算法，可选: SORT
+  tracker: tracker
 # 检测与跟踪参数
 conf_threshold: 0.4
 iou_threshold: 0.5
-
 # 数据集路径与设置
 dataset:
-  fog_strength: 0.85
+# 雾强度
+  fog_strength: 0.75
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 8
-  is_mask: True
-  path: "./data/UAV-M"
-  data_path: "UAV-benchmark-M"
-  label_path: "UAV-benchmark-MOTD_v1.0/GT"
-  is_clean: True
-  shuffle: True
-
+  is_mask: true
+  path: ./data/UAV-M
+  data_path: UAV-benchmark-M
+  label_path: UAV-benchmark-MOTD_v1.0/GT
+  is_clean: true
+  shuffle: true
 # 是否保存可视化结果
 save_output: true
-
 # 随机种子
 seed: 2025
-
 # 训练参数
 train:
-   # 每5个epoch存一次模型
+# 每5个epoch存一次模型
   checkpoint_interval: 5
-
-  # 每10个step终端更新一次数据
+# 每10个step终端更新一次数据
   log_interval: 10
-
-  debug: False
-
-  # epochs
+  debug: false
   epochs: 80
-
-  # 是否恢复训练
-  resume_training: False
-
-  # 学习率设置
+  resume_training: false
   lr: 0.001
-
-  # 是否冻结去雾模型
-  freeze_dehaze: True
-
-  # 是否在模型中先训练去雾模型，后训练检测器
-  pretrain_flag: False
-
-  # 去雾模型先训练epoch
+  freeze_dehaze: true
+  pretrain_flag: false
   dehaze_epoch: 5
-

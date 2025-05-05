@@ -1,0 +1,5 @@
+model:
+  history_length: 4
+  nums_p_channels: 48
+  hidden_channels: 128
+  decay_gamma: 0.8

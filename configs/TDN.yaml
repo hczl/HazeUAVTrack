@@ -9,9 +9,9 @@ method:
 # 生成雾方法，可选: None, MiDaS_Deep
   haze: MiDaS_Deep
 # 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
-  dehaze: DIP
+  dehaze: NONE
 # 检测器，可选: YOLOV3,  DITOL
-  detector: YOLOV3
+  detector: TDN
 # 跟踪算法，可选: SORT
   tracker: tracker
 # 检测与跟踪参数
@@ -29,7 +29,7 @@ dataset:
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: true
-  shuffle: true
+  shuffle: False
 # 是否保存可视化结果
 save_output: true
 # 随机种子

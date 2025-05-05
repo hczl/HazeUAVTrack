@@ -21,32 +21,6 @@ class PerceptualLoss(nn.Module):
         return F.l1_loss(self.vgg(x), self.vgg(y))
 
 
-# 损失函数定义
-def loss_forward(pred: torch.Tensor, target: torch.Tensor) -> dict:
-    """
-    pred: 去雾后的图像, shape (B, C, H, W)
-    target: 无雾真实图像, shape (B, C, H, W)
-    return: 包含多种 loss 和 total_loss 的字典
-    """
-    l1 = F.l1_loss(pred, target)
-    ssim = 1 - ssim_loss(pred, target)
-    perceptual = PerceptualLoss()(pred, target)
-    tv = total_variation_loss(pred)
-
-    # Loss 权重（可以微调）
-    loss_dict = {
-        'l1_loss': l1,
-        'ssim_loss': ssim,
-        'perceptual_loss': perceptual,
-        'tv_loss': tv
-    }
-
-    # 组合总损失
-    total = l1 + 0.8 * ssim + 0.5 * perceptual + 0.1 * tv
-    loss_dict['total_loss'] = total
-
-    return loss_dict
-
 
 # TV 损失
 def total_variation_loss(x):

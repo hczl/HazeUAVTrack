@@ -1,6 +1,12 @@
 import cv2
 import torch
 import torch.nn as nn
+from ultralytics import YOLO
+from ultralytics.utils.loss import v8DetectionLoss
+from ultralytics.utils.ops import non_max_suppression
+
+from models.detector.DE_NET.utils import changeed__call__, process_batch
+
 
 # --- 保留的图像增强模块 ---
 
@@ -248,8 +254,8 @@ class Up_guide(nn.Module):
         return x
 
 # DENet 类：完整的图像增强网络
-class DENET(nn.Module):
-    def __init__(self,
+class DE_NET(nn.Module):
+    def __init__(self, cfg,
                  num_high=3, # 拉普拉斯金字塔的高频层数
                  ch_blocks=64, # Trans_low 的中间通道数
                  up_ksize=1, # Up_guide 的卷积核大小
@@ -258,6 +264,7 @@ class DENET(nn.Module):
                  ch_mask=16, # Trans_guide 的中间通道数
                  gauss_kernel=5): # 拉普拉斯金字塔的高斯核大小
         super().__init__()
+        self.cfg = cfg
         self.num_high = num_high
         # 拉普拉斯金字塔分解/重建模块
         self.lap_pyramid = Lap_Pyramid_Conv(num_high, gauss_kernel)
@@ -270,8 +277,18 @@ class DENET(nn.Module):
                              Up_guide(up_ksize, ch=3)) # 指导信息通道数应与图像通道数一致 (3)
             self.__setattr__('trans_high_layer_{}'.format(i),
                              Trans_high(3, high_ch, 3, high_ksize)) # 输入输出都是3通道
-        # loss
-        self.criterion = nn.MSELoss()
+
+        # 用ultralytics载入模型并提取其 nn.Module（只做一次）
+        yolov3_wrapper = YOLO('yolov3.yaml')
+        yolov3_wrapper.load('models/detector/YOLOV3/yolov3u.pt')
+        self.yolov3 = yolov3_wrapper.model
+        self.loss_fn = yolov3_wrapper.loss
+
+        # monkey patch loss
+        v8DetectionLoss.__call__ = changeed__call__
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     def forward(self, x): # x 是原始输入图像
         # 拉普拉斯金字塔分解
         pyrs = self.lap_pyramid.pyramid_decom(img=x) # pyrs = [高频1, ..., 高频N, 最低频]
@@ -301,12 +318,33 @@ class DENET(nn.Module):
 
         # 重建增强后的图像
         out = self.lap_pyramid.pyramid_recons(trans_pyrs)
-
+        out = self.yolov3(out)
         return out
 
-    def forward_loss(self, haze_img, clean_img):
-        dehaze_img = self(haze_img)
-        loss = self.criterion(dehaze_img, clean_img)
+    @torch.no_grad()
+    def predict(self, high_res_images, conf_thresh=0.95, iou_thresh=0.45):
+        self.eval()
+        self.yolov3.eval()
+        raw_output = self(high_res_images)
+        return self.decode_output(raw_output, conf_thresh, iou_thresh)
+
+    def decode_output(self, raw_output, conf_thresh=0.95, iou_thresh=0.45, max_det=300):
+        detections = non_max_suppression(
+            raw_output,
+            conf_thres=conf_thresh,
+            iou_thres=iou_thresh,
+            max_det=max_det,
+            classes=None,
+        )
+        return detections
+
+    def forward_loss(self, haze_imgs, targets, ignore_list):
+        haze_imgs, targets, ignore_list = process_batch((haze_imgs, targets, ignore_list))
+        yolov3_output = self(haze_imgs)
+        yolov3_loss_tuple = self.loss_fn(targets, yolov3_output)
+        all_loss_tensors = [loss for group in yolov3_loss_tuple for loss in group]
+        yolov3_total_loss = sum(all_loss_tensors)
         return {
-            'total_loss': loss,
+            'yolov3_loss': yolov3_total_loss,
+            'total_loss': yolov3_total_loss,
         }

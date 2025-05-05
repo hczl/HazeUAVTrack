@@ -60,9 +60,10 @@ class FSDT(nn.Module):
             for key, value in loss_dict.items():
                 if key not in epoch_losses:
                     epoch_losses[key] = 0.0
-                epoch_losses[key] += value.detach().item()
-
-
+                if isinstance(value, torch.Tensor):
+                    epoch_losses[key] += value.detach().item()
+                else:
+                    epoch_losses[key] += float(value)
             if batch_idx % self.cfg['train']['log_interval'] == 0:
                 postfix = {}
                 for k, v in loss_dict.items():
@@ -106,7 +107,6 @@ class FSDT(nn.Module):
                 print(f"==> 加载检测器组合模型权重：{detector_combo_ckpt}")
             else:
                 print("==> 未找到检测器组合模型，仅加载去雾模型")
-
         if self.cfg['train']['resume_training']:
             # 检测是否加载成功
             dehaze_loaded = False

@@ -6,29 +6,49 @@ from torchvision.models import mobilenet_v3_small
 from .utils import total_variation_loss, PerceptualLoss
 
 
-# 多尺度注意力增强模块
-class MSAEBlock(nn.Module):
-    def __init__(self, in_channels):
+class ChannelAttention(nn.Module):
+    def __init__(self, in_channels, ratio=8):
         super().__init__()
-        self.conv3 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-        self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=5, padding=2)
-        self.dilated = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=2, dilation=2)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
 
-        self.attn = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels, in_channels // 8, kernel_size=1),
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels // ratio, 1, bias=False),
             nn.ReLU(),
-            nn.Conv2d(in_channels // 8, in_channels, kernel_size=1),
-            nn.Sigmoid()
+            nn.Conv2d(in_channels // ratio, in_channels, 1, bias=False)
         )
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        feat3 = self.conv3(x)
-        feat5 = self.conv5(x)
-        feat_dil = self.dilated(x)
-        fused = feat3 + feat5 + feat_dil
-        weight = self.attn(fused)
-        return fused * weight + x  # 残差连接
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        out = avg_out + max_out
+        return self.sigmoid(out)
+
+
+class SpatialAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size=7, padding=3, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x_cat = torch.cat([avg_out, max_out], dim=1)
+        return self.sigmoid(self.conv(x_cat))
+
+
+class CBAMBlock(nn.Module):
+    def __init__(self, in_channels, ratio=8):
+        super().__init__()
+        self.channel_att = ChannelAttention(in_channels, ratio)
+        self.spatial_att = SpatialAttention()
+
+    def forward(self, x):
+        out = x * self.channel_att(x)
+        out = out * self.spatial_att(out)
+        return out + x  # 残差连接
 
 
 class BDN(nn.Module):
@@ -40,7 +60,7 @@ class BDN(nn.Module):
         self.encoder = nn.Sequential(*list(backbone.children())[:6])  # 使用前6层
         encoder_out_channels = list(backbone.children())[5].out_channels  # 第6层的输出通道数
 
-        self.msae = MSAEBlock(encoder_out_channels)
+        self.cbam = CBAMBlock(encoder_out_channels)
 
         # 透射图估计分支
         self.trans_branch = nn.Sequential(
@@ -64,7 +84,7 @@ class BDN(nn.Module):
 
     def forward(self, x):
         feat = self.encoder(x)
-        feat = self.msae(feat)
+        feat = self.cbam(feat)
 
         t = self.trans_branch(feat)
         if t.shape[2:] != x.shape[2:]:

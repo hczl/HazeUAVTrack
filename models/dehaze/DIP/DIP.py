@@ -66,7 +66,6 @@ class DIP(nn.Module):
 
     def forward_loss(self, haze_img, clean_img):
         dehaze_img = self(haze_img)
-        print(dehaze_img.device)
         loss = self.criterion(dehaze_img, clean_img)
         return {
             'total_loss': loss,

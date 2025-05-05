@@ -21,9 +21,7 @@ transform = transforms.Compose([transforms.ToTensor()])
 max_size = 640
 
 # ---- 去雾方法和检测器 ----
-dehazes = ['DIP', 'DENET', 'FALCON']
-detectors = ['YOLOV3', 'DITOL']
-yaml_path = 'configs/IA_YOLOV3.yaml'
+yaml_paths = ['configs/TDN.yaml']
 fps_results = {}
 
 # ---- 获取图像列表 ----
@@ -34,51 +32,47 @@ image_files = sorted([
 ])
 
 # ---- 对每组组合计算 FPS ----
-for dehaze in dehazes:
-    for detector in detectors:
-        name = f"{dehaze}_{detector}"
-        print(f"\n加载配置: {name}")
-        cfg = load_config(yaml_path)
-        cfg['method']['dehaze'] = dehaze
-        cfg['method']['detector'] = detector
+for yaml_path in yaml_paths:
+    print(f"\n加载配置: {yaml_path}")
+    cfg = load_config(yaml_path)
 
-        model = create_model(cfg)
-        model.load_model()
-        device = cfg['device']
-        model.to(device)
-        print(f"使用设备: {device}")
+    model = create_model(cfg)
+    model.load_model()
+    device = cfg['device']
+    model.to(device)
+    print(f"使用设备: {device}")
 
-        frame_times = []
+    frame_times = []
 
-        with torch.no_grad():
-            for image_path in image_files:
-                try:
-                    image = Image.open(image_path).convert("RGB")
-                except:
-                    continue
+    with torch.no_grad():
+        for image_path in image_files:
+            try:
+                image = Image.open(image_path).convert("RGB")
+            except:
+                continue
 
-                image_tensor = transform(image)
-                orig_h, orig_w = image_tensor.shape[1], image_tensor.shape[2]
-                r = min(1.0, max_size / float(max(orig_w, orig_h)))
-                new_h = max(32, int(math.floor(orig_h * r / 32) * 32))
-                new_w = max(32, int(math.floor(orig_w * r / 32) * 32))
-                image_resized = F.resize(image_tensor, (new_h, new_w))
-                input_tensor = image_resized.unsqueeze(0).to(device)
+            image_tensor = transform(image)
+            orig_h, orig_w = image_tensor.shape[1], image_tensor.shape[2]
+            r = min(1.0, max_size / float(max(orig_w, orig_h)))
+            new_h = max(32, int(math.floor(orig_h * r / 32) * 32))
+            new_w = max(32, int(math.floor(orig_w * r / 32) * 32))
+            image_resized = F.resize(image_tensor, (new_h, new_w))
+            input_tensor = image_resized.unsqueeze(0).to(device)
 
-                start_time = time.time()
-                _ = model.predict(input_tensor)
-                torch.cuda.synchronize()  # 保证计时准确
-                elapsed = time.time() - start_time
-                frame_times.append(elapsed)
+            start_time = time.time()
+            _ = model.predict(input_tensor)
+            torch.cuda.synchronize()  # 保证计时准确
+            elapsed = time.time() - start_time
+            frame_times.append(elapsed)
 
-        # ---- FPS 统计 ----
-        if frame_times:
-            avg_fps = len(frame_times) / sum(frame_times)
-            fps_results[name] = avg_fps
-            print(f"{name} 平均 FPS：{avg_fps:.2f}")
-        else:
-            fps_results[name] = 0
-            print(f"{name} 未处理图像。")
+    # ---- FPS 统计 ----
+    if frame_times:
+        avg_fps = len(frame_times) / sum(frame_times)
+        fps_results[yaml_path] = avg_fps
+        print(f"{yaml_path} 平均 FPS：{avg_fps:.2f}")
+    else:
+        fps_results[yaml_path] = 0
+        print(f"{yaml_path} 未处理图像。")
 
 # ---- 绘制 FPS 对比图 ----
 sorted_results = sorted(fps_results.items(), key=lambda x: x[1], reverse=True)
