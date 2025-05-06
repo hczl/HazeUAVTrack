@@ -1,5 +1,6 @@
 import torch
 from torch import optim
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, StepLR
 from torch.utils.data import DataLoader
 
 from FSDT import FSDT
@@ -11,7 +12,9 @@ def create_data(cfg):
     builder = UAVDataLoaderBuilder(cfg)
 
     transform = transforms.Compose([
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
     train_dataset, val_dataset, test_dataset, train_clean_dataset, val_clean_dataset = builder.build(
         train_ratio=cfg['dataset']['train_ratio'],
@@ -68,6 +71,47 @@ def create_model(cfg):
     model.device = cfg['device']  # Add device attribute for model to use
 
     # 5. Create an optimizer
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg['train']['lr'])
+    initial_lr = cfg['train']['lr']
+    # 建议使用 AdamW，特别是当你的模型包含 Weight Decay 时
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=initial_lr)
+
+    # --- Create learning rate scheduler ---
+    num_epochs = cfg['train']['epochs']
+    warmup_epochs = cfg['train'].get('warmup_epochs', 0) # 从 config 获取，默认 0
+    warmup_start_factor = cfg['train'].get('warmup_start_factor', 1.0) # 从 config 获取，默认 1.0
+
+    # 获取主衰减调度器的参数
+    lr_decay_step = cfg['train'].get('lr_decay_step', 30)
+    lr_decay_gamma = cfg['train'].get('lr_decay_gamma', 0.1)
+
+    # 创建主衰减调度器 (例如 StepLR)
+    main_scheduler = StepLR(
+        optimizer,
+        step_size=lr_decay_step,
+        gamma=lr_decay_gamma
+    )
+
+    # 如果设置了 warmup_epochs > 0，则创建 warmup 调度器并与主调度器组合
+    if warmup_epochs > 0:
+         warmup_scheduler = LinearLR(
+             optimizer,
+             start_factor=warmup_start_factor,
+             end_factor=1.0, # Warmup 结束时达到基础学习率
+             total_iters=warmup_epochs
+         )
+         # 使用 SequentialLR 将 warmup 和主调度器按顺序执行
+         scheduler = SequentialLR(
+             optimizer,
+             schedulers=[warmup_scheduler, main_scheduler],
+             milestones=[warmup_epochs] # 在 warmup_epochs 结束后切换
+         )
+    else:
+         # 如果没有 warmup，直接使用主调度器
+         scheduler = main_scheduler
+
+    # --- Scheduler creation end ---
+
     model.optimizer = optimizer  # Add optimizer to the model
+    model.scheduler = scheduler # Add scheduler to the model
+
     return model

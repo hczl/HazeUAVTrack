@@ -265,21 +265,27 @@ class DetectionHead(nn.Module):
             nn.Conv2d(64, num_classes * 5, kernel_size=1)
         )
 
+        pi = 0.01
+        bias_value = -torch.log(torch.tensor((1 - pi) / pi))
+
+        with torch.no_grad(): # 确保不记录梯度
+             self.head[-1].bias[4::5].fill_(bias_value)
+
     def forward(self, x):
         out = self.head(x)
         B, C, H, W = out.shape
+        assert C == self.num_classes * 5, f"Expected output channels {self.num_classes * 5}, but got {C}"
+
         out = out.view(B, self.num_classes, 5, H, W)
 
-        # Apply sigmoid to dx, dy (relative position in cell)
-        out[:, :, 0:2, :, :] = torch.sigmoid(out[:, :, 0:2, :, :])
+        dx_dy = torch.sigmoid(out[:, :, 0:2, :, :]) # Keep sigmoid here based on decode_preds
+        dw_dh = torch.exp(torch.clamp(out[:, :, 2:4, :, :], max=4)) # Keep exp here
+        conf = torch.sigmoid(out[:, :, 4:5, :, :]) # Keep sigmoid here
 
-        # Apply exp to dw, dh (scale/size, keep positive)
-        out[:, :, 2:4, :, :] = torch.exp(out[:, :, 2:4, :, :])
-
-        # Confidence already uses sigmoid
-        out[:, :, 4, :, :] = torch.sigmoid(out[:, :, 4, :, :])
-
+        out = torch.cat([dx_dy, dw_dh, conf], dim=2)  # [B, num_classes, 5, H, W]
         return out.view(B, self.num_classes * 5, H, W)
+
+
 
 
 class TDN(nn.Module):
@@ -378,7 +384,6 @@ class TDN(nn.Module):
 
             hist_f_tensor = self._hist_f[:, :-1, :, :, :]
             hist_p_tensor = self._hist_p[:, :-1, :, :, :]
-
         # 加权融合历史信息
         weights = self.get_decay_weights(self.hist_len - 1, gamma=0.8, device=x.device)
 
@@ -402,60 +407,96 @@ class TDN(nn.Module):
         return fused_hist
 
     def _compute_single_loss(self, pred_boxes_conf, targets, ignore_list):
+        # 将目标框和忽略区域框转换为 tensor
         gt_boxes = [[float(ann[2]), float(ann[3]),
                      float(ann[2]) + float(ann[4]),
                      float(ann[3]) + float(ann[5])] for ann in targets]
+        gt_boxes_tensor = torch.tensor(gt_boxes, device=pred_boxes_conf.device) if gt_boxes else None
 
         ignore_boxes = [[float(ann[2]), float(ann[3]),
                          float(ann[2]) + float(ann[4]),
                          float(ann[3]) + float(ann[5])] for ann in ignore_list]
-
-        if not gt_boxes:
-            if pred_boxes_conf.numel() > 0:
-                 conf_target = torch.zeros_like(pred_boxes_conf[:, 4])
-                 conf_loss = F.mse_loss(pred_boxes_conf[:, 4], conf_target, reduction='sum')
-                 bbox_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
-            else:
-                 zero = torch.tensor(0.0, device=pred_boxes_conf.device)
-                 conf_loss = zero
-                 bbox_loss = zero
-            return {'conf_loss': conf_loss, 'bbox_loss': bbox_loss}
-
-        gt_boxes = torch.tensor(gt_boxes, device=pred_boxes_conf.device)
-        ignore_boxes = torch.tensor(ignore_boxes, device=pred_boxes_conf.device) if ignore_boxes else None
+        ignore_boxes_tensor = torch.tensor(ignore_boxes, device=pred_boxes_conf.device) if ignore_boxes else None
 
         pred_boxes = pred_boxes_conf[:, :4]
         pred_confs = pred_boxes_conf[:, 4]
 
-        if pred_boxes.numel() == 0:
-            conf_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
-            bbox_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
-        else:
-            ious_gt = compute_iou(pred_boxes, gt_boxes)
+        # 初始化损失和计数
+        conf_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
+        bbox_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
+        num_matched = 0
+        num_non_ignored = 0
+
+        # 计算忽略区域掩码 (如果存在预测框和忽略框)
+        ignore_mask = None
+        if ignore_boxes_tensor is not None and ignore_boxes_tensor.numel() > 0 and pred_boxes.numel() > 0:
+             ious_ignore = compute_iou(pred_boxes, ignore_boxes_tensor)
+             max_iou_ignore, _ = ious_ignore.max(dim=1)
+             ignore_mask = max_iou_ignore > 0.5
+        elif pred_boxes.numel() > 0: # 只有预测框，没有忽略框
+             ignore_mask = torch.zeros_like(pred_confs, dtype=torch.bool)
+        # else: pred_boxes 为空，ignore_mask 不用于索引 pred_confs，无需定义
+
+        # 计算非忽略的预测网格细胞数量
+        if pred_confs.numel() > 0:
+             num_non_ignored = (~ignore_mask).sum().item() if ignore_mask is not None else pred_confs.numel()
+
+
+        # --- 计算置信度损失 ---
+        if pred_confs.numel() > 0:
+             # 获取非忽略的预测置信度和对应的目标（如果存在 GT 框）
+             current_ignore_mask = ignore_mask if ignore_mask is not None else torch.zeros_like(pred_confs, dtype=torch.bool)
+             non_ignored_mask = ~current_ignore_mask
+             non_ignored_preds = pred_confs[non_ignored_mask]
+
+             if non_ignored_preds.numel() > 0:
+                  if gt_boxes_tensor is not None and gt_boxes_tensor.numel() > 0:
+                       # 如果有 GT 框，计算 IoU 并确定目标
+                       ious_gt = compute_iou(pred_boxes, gt_boxes_tensor)
+                       best_iou_gt, _ = ious_gt.max(dim=1)
+                       conf_target = (best_iou_gt > 0.1).float()
+                       non_ignored_targets = conf_target[non_ignored_mask]
+                  else:
+                       # 如果没有 GT 框，所有非忽略的目标都是背景（置信度为 0）
+                       non_ignored_targets = torch.zeros_like(non_ignored_preds)
+
+                  # 计算置信度损失
+                  if getattr(self, "_use_mse", False):
+                       conf_loss = F.mse_loss(non_ignored_preds, non_ignored_targets, reduction='mean')
+                  else:
+                       # 使用 focal_loss，并确保 reduction='mean'
+                       conf_loss = focal_loss(non_ignored_preds, non_ignored_targets, alpha=0.25, gamma=2.0, reduction='mean')
+             # else: non_ignored_preds 为空，conf_loss 保持 0.0
+
+        # --- 计算边界框损失 ---
+        if gt_boxes_tensor is not None and gt_boxes_tensor.numel() > 0 and pred_boxes.numel() > 0:
+            # 只有在有 GT 框和预测框时才计算边界框损失
+            # 需要重新计算 ious_gt 和 best_gt_idx，因为上面计算置信度时可能没有计算
+            # 或者在上面计算 conf_loss 前就计算好并保存
+            # 为了简洁，这里重新计算或者确保上面计算了
+            ious_gt = compute_iou(pred_boxes, gt_boxes_tensor)
             best_iou_gt, best_gt_idx = ious_gt.max(dim=1)
+            current_ignore_mask = ignore_mask if ignore_mask is not None else torch.zeros_like(pred_confs, dtype=torch.bool)
 
-            if ignore_boxes is not None and ignore_boxes.numel() > 0:
-                 ious_ignore = compute_iou(pred_boxes, ignore_boxes)
-                 max_iou_ignore, _ = ious_ignore.max(dim=1)
-                 ignore_mask = max_iou_ignore > 0.5
-            else:
-                 ignore_mask = torch.zeros_like(best_iou_gt, dtype=torch.bool)
-
-            conf_target = (best_iou_gt > 0.3).float()
-            # conf_loss = F.mse_loss(pred_confs[~ignore_mask], conf_target[~ignore_mask], reduction='sum')
-            conf_loss = focal_loss(pred_confs[~ignore_mask], conf_target[~ignore_mask], alpha=0.25, gamma=2.0)
-            match_mask = (best_iou_gt > 0.3) & (~ignore_mask)
+            # 匹配条件：与 GT 的 IoU > 0.1 且不在忽略区域
+            match_mask = (best_iou_gt > 0.1) & (~current_ignore_mask)
             matched_pred = pred_boxes[match_mask]
-            matched_gt = gt_boxes[best_gt_idx[match_mask]]
+            matched_gt = gt_boxes_tensor[best_gt_idx[match_mask]]
 
-            if len(matched_pred) > 0:
-                 bbox_loss = F.smooth_l1_loss(matched_pred, matched_gt, reduction='sum')
-            else:
-                 bbox_loss = torch.tensor(0.0, device=pred_boxes_conf.device)
+            num_matched = len(matched_pred)
 
+            if num_matched > 0:
+                 # 使用 SmoothL1Loss，并确保 reduction='mean'
+                 bbox_loss = F.smooth_l1_loss(matched_pred, matched_gt, reduction='mean')
+            # else: bbox_loss 保持 0.0
+
+
+        # 返回损失和计数
         return {
             'conf_loss': conf_loss,
-            'bbox_loss': bbox_loss
+            'bbox_loss': bbox_loss,
+            'num_matched': num_matched,
+            'num_non_ignored': num_non_ignored
         }
 
     def compute_batch_loss(self, preds, targets, ignore_list, img_size):
@@ -463,6 +504,9 @@ class TDN(nn.Module):
 
         batch_conf_loss = 0.0
         batch_bbox_loss = 0.0
+        total_matched_in_batch = 0
+        total_non_ignored_in_batch = 0
+
         num_images_in_batch = len(pred_boxes_confs_list)
 
         for i in range(num_images_in_batch):
@@ -475,22 +519,27 @@ class TDN(nn.Module):
                 single_image_targets,
                 single_image_ignore
             )
+            # 直接累加归一化后的损失
             batch_conf_loss += loss_dict['conf_loss']
             batch_bbox_loss += loss_dict['bbox_loss']
+            total_matched_in_batch += loss_dict['num_matched']
+            total_non_ignored_in_batch += loss_dict['num_non_ignored']
 
         total_batch_loss = batch_conf_loss + batch_bbox_loss
 
-        avg_conf_loss = batch_conf_loss / num_images_in_batch
-        avg_bbox_loss = batch_bbox_loss / num_images_in_batch
-        avg_total_loss = total_batch_loss / num_images_in_batch
+        final_avg_conf_loss = batch_conf_loss / num_images_in_batch
+        final_avg_bbox_loss = batch_bbox_loss / num_images_in_batch
+        final_avg_total_loss = total_batch_loss / num_images_in_batch
 
         log_dict = {
-            'total_loss': avg_total_loss,
-            'conf_loss': avg_conf_loss.detach(),
-            'bbox_loss': avg_bbox_loss.detach()
+            'total_loss': final_avg_total_loss,
+            'conf_loss': final_avg_conf_loss.detach(),
+            'bbox_loss': final_avg_bbox_loss.detach(),
+            'avg_matched_per_image': total_matched_in_batch / num_images_in_batch,  # Add stats for debugging
+            'avg_non_ignored_per_image': total_non_ignored_in_batch / num_images_in_batch
         }
 
-        return {'total_loss': avg_total_loss, **log_dict}
+        return {'total_loss': final_avg_total_loss, **log_dict}
 
 
     def forward_loss(self, dehaze_imgs, targets, ignore_list=None):
@@ -499,13 +548,13 @@ class TDN(nn.Module):
         if ignore_list is None:
             ignore_list = [[] for _ in range(B)]
 
-        preds = self(dehaze_imgs,True)
+        preds = self(dehaze_imgs, training=True)
 
         loss_dict = self.compute_batch_loss(
             preds,
             targets,
             ignore_list,
-            (W_img, H_img)
+            (H_img, W_img)
         )
 
         self.reset_memory()
@@ -547,8 +596,6 @@ class TDN(nn.Module):
 
             filtered_preds = torch.cat([boxes, scores.unsqueeze(1)], dim=1)
             results.append(filtered_preds)
-
-        self.reset_memory()
 
         return results
 

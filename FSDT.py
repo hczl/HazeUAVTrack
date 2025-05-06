@@ -49,6 +49,8 @@ class FSDT(nn.Module):
         else:
             loss_dict = self.dehaze.forward_loss(low_res_images, targets_img)
             loss_dict['total_loss'].backward()
+        self.optimizer.step()
+
         return loss_dict
 
     def train_epoch(self, train_loader, train_clean_loader, epoch):
@@ -146,6 +148,8 @@ class FSDT(nn.Module):
             self.detector_flag = False
 
         for epoch in range(0, num_epochs):
+            if hasattr(self.detector, '_use_mse'):
+                self.detector._use_mse = (epoch < 2)  # 训练前两轮使用 MSE
             # pretrain
             if not self.freeze_dehaze and epoch > self.cfg['train']['dehaze_epoch'] and self.pretrain_flag:
                 self.detector_flag = True
@@ -154,9 +158,11 @@ class FSDT(nn.Module):
                 for param in self.dehaze.parameters():
                     param.requires_grad = False
                 print("冻结预训练去雾模型")
-
             self.train_epoch(train_loader, train_clean_loader, epoch)
-
+            if hasattr(self, 'scheduler') and self.scheduler is not None:
+                self.scheduler.step()
+                current_lr = self.optimizer.param_groups[0]['lr']
+                print(f"Epoch {epoch + 1} finished. Current LR: {current_lr:.6f}")
             # 验证
             val_loss = self.evaluate(val_loader, val_clean_loader)
             # 如果检测器效果比历史好
@@ -233,7 +239,10 @@ class FSDT(nn.Module):
             for key, value in loss_dict.items():
                 if key not in epoch_losses:
                     epoch_losses[key] = 0.0
-                epoch_losses[key] += value.item()
+                if isinstance(value, torch.Tensor):
+                    epoch_losses[key] += value.detach().item()
+                else:
+                    epoch_losses[key] += float(value)
 
             if batch_idx % self.cfg['train']['log_interval'] == 0:
                 postfix = {}

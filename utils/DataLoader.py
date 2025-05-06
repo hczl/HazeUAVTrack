@@ -134,7 +134,7 @@ class UAVOriginalDataset(Dataset):
             annotations[:, 4] *= scale_factor_w
             annotations[:, 5] *= scale_factor_h
         else:
-            annotations = torch.empty((0, 6), dtype=torch.float32)  # 假设6列
+            annotations = torch.empty((0, 9), dtype=torch.float32)  # 假设6列
 
         if self.is_mask:
             if ignore_annotations:
