@@ -59,8 +59,19 @@ def get_template():
     set_field(method, 'haze', 'MiDaS_Deep', '生成雾图像的方法（None 或 MiDaS_Deep）', prefix)
     set_field(method, 'dehaze', 'AOD_NET', '去雾方法：None、DIP、FALCON、AOD_NET、BDN', prefix)
     set_field(method, 'detector', 'YOLOV3', '检测器类型：None、YOLOV3、IA_YOLOV3、TDN', prefix)
-    set_field(method, 'tracker', 'tracker', None, prefix)  # 原注释不保留
-    set_field(method, 'track_method', 'bytetrack', '跟踪算法，可选: boosttrack, botsort, bytetrack, strongsort, deepocsort, ocsort, imprassoc', prefix)
+    set_field(method, 'tracker', 'tracker', None, prefix)
+    set_field(method, 'track_method', 'bytetrack',
+              '跟踪算法，可选: boosttrack, botsort, bytetrack, strongsort, deepocsort, ocsort, imprassoc', prefix)
+
+    # tracker_args = CommentedMap()
+    # sub_prefix = f'{prefix}.tracker_args'
+    # set_field(tracker_args, 'track_high_thresh', 0.5, '高置信度阈值，用于维持跟踪', sub_prefix)
+    # set_field(tracker_args, 'track_low_thresh', 0.1, '低置信度阈值，用于终止跟踪', sub_prefix)
+    # set_field(tracker_args, 'new_track_thresh', 0.7, '新目标的创建阈值', sub_prefix)
+    # set_field(tracker_args, 'max_age', 30, '丢失目标的最大帧数', sub_prefix)
+    # set_field(tracker_args, 'mot20', False, '是否使用MOT20数据集设置', sub_prefix)
+    # method['tracker_args'] = tracker_args
+
     cfg['method'] = method
 
     set_field(cfg, 'conf_threshold', 0.4, '目标检测的置信度阈值')

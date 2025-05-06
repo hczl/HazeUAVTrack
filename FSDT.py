@@ -35,7 +35,6 @@ class FSDT(nn.Module):
                                       f"models.trackers.{cfg['method']['tracker']}", cfg)
 
     def train_step(self,tra_batch, clean_batch):
-
         low_res_images, targets, ignore_list = tra_batch
         low_res_images = low_res_images.to(self.device)
         targets_img, _, _ = clean_batch
@@ -53,15 +52,13 @@ class FSDT(nn.Module):
         return loss_dict
 
     def train_epoch(self, train_loader, train_clean_loader, epoch):
+        self.train()
         epoch_losses = {}
         pbar = tqdm(zip(train_loader, train_clean_loader), total=self.train_batch_nums, desc=f"Epoch {epoch}")
-
-
         # 调试用：展示前2张图和标注框
         # preview_batch_with_boxes(train_loader)
-
-
         for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
+
             loss_dict = self.train_step(tra_batch, clean_batch)
 
             # 累加每个 loss 项

@@ -1,12 +1,25 @@
 # models/trackers/boxmot_tracker.py
+import os
 
-from boxmot.tracker_zoo import create_tracker
 import torch
+from boxmot.tracker_zoo import create_tracker
+from torch import nn
 
-class BoxMOTTracker:
+
+class tracker(nn.Module):
     def __init__(self, cfg):
+        super().__init__()
         self.cfg = cfg
-        self.tracker = create_tracker(cfg['boxmot']['tracker_name'], cfg['boxmot']['args'])
+
+        tracker_type = cfg['method']['track_method']  # e.g. 'bytetrack'
+        config_path = os.path.join(os.path.dirname(__file__), 'configs', f'{tracker_type}.yaml')
+
+        self.tracker = create_tracker(
+            tracker_type=tracker_type,
+            tracker_config=config_path,
+            device=cfg.get('device', 'cuda')
+        )
+
         self.frame_id = 0
 
     def update(self, detections, image_tensor, frame_id=None):
