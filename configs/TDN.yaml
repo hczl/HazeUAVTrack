@@ -9,8 +9,8 @@ method:
 # 生成雾方法，可选: None, MiDaS_Deep
   haze: MiDaS_Deep
 # 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
-  dehaze: NONE
-# 检测器，可选: YOLOV3,  DITOL
+  dehaze: AOD_NET
+# 检测器，可选: NONE, YOLOV3, IA_YOLOV3, TDN, DE_NET
   detector: TDN
 # 跟踪算法，可选: SORT
   tracker: tracker
@@ -20,18 +20,17 @@ iou_threshold: 0.5
 # 数据集路径与设置
 dataset:
 # 雾强度
-# 雾强度
   fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 32
+  batch: 8
   is_mask: true
   path: ./data/UAV-M
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: true
   shuffle: false
-# 是否保存可视化结果
+  nums_worker: 8
 save_output: true
 # 随机种子
 seed: 2025

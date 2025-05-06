@@ -8,9 +8,9 @@ tracker_flag: false
 method:
 # 生成雾方法，可选: None, MiDaS_Deep
   haze: MiDaS_Deep
-# 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
+# 去雾方法，可选: NONE, DIP, FALCON, AOD_NET, BDN
   dehaze: DIP
-# 检测器，可选: YOLOV3,  DITOL
+# 检测器，可选: NONE, YOLOV3, IA_YOLOV3, TDN, DE_NET
   detector: YOLOV3
 # 跟踪算法，可选: SORT
   tracker: tracker
@@ -32,6 +32,7 @@ dataset:
   is_clean: true
   shuffle: true
 # 是否保存可视化结果
+  nums_worker: 8
 save_output: true
 # 随机种子
 seed: 2025

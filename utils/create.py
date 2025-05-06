@@ -34,17 +34,28 @@ def create_data(cfg):
     val_shared_sampler = IndexSampler(val_indices)
 
     train_loader = DataLoader(train_dataset, batch_size=cfg['dataset']['batch'], sampler=train_shared_sampler,
-                              collate_fn=custom_collate_fn)
+                              collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
+                              pin_memory=True)
+
     val_loader = DataLoader(val_dataset, batch_size=cfg['dataset']['batch'], sampler=val_shared_sampler,
-                            collate_fn=custom_collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=cfg['dataset']['batch'], shuffle=cfg['dataset'].get('shuffle', True),
-                             collate_fn=custom_collate_fn)
+                            collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
+                            pin_memory=True)
+
+    test_loader = DataLoader(test_dataset, batch_size=cfg['dataset']['batch'],
+                             shuffle=cfg['dataset'].get('shuffle', True),
+                             collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
+                             pin_memory=True)
 
     if cfg['dataset']['is_clean']:
-        train_clean_loader = DataLoader(train_clean_dataset, batch_size=cfg['dataset']['batch'], sampler=train_shared_sampler,
-                                  collate_fn=custom_collate_fn)
+        train_clean_loader = DataLoader(train_clean_dataset, batch_size=cfg['dataset']['batch'],
+                                        sampler=train_shared_sampler,
+                                        collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
+                                        pin_memory=True)
+
         val_clean_loader = DataLoader(val_clean_dataset, batch_size=cfg['dataset']['batch'], sampler=val_shared_sampler,
-                                      collate_fn=custom_collate_fn)
+                                      collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
+                                      pin_memory=True)
+
     else:
         train_clean_loader = None
         val_clean_loader = None

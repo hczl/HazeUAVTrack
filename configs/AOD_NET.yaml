@@ -1,50 +1,58 @@
-# gpu设置
+# 设置GPU设备，'cuda'表示使用NVIDIA GPU进行加速
 device: cuda
-# 模型是否启用检测器
+
+# 是否启用检测器（例如目标检测模型）
 detector_flag: false
-# 模型是否启用追踪器
+
+# 是否启用目标跟踪器
 tracker_flag: false
-# 模型选择
+
+# 模型相关设置
 method:
-# 生成雾方法，可选: None, MiDaS_Deep
+  # 生成雾图像的方法，选项包括: None（不加雾）或 MiDaS_Deep（使用MiDaS生成深度图并添加雾效）
   haze: MiDaS_Deep
-# 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
+
+  # 去雾方法，可选: NONE, DIP, FALCON, AOD_NET, BDN
   dehaze: AOD_NET
-# 检测器，可选: YOLOV3,  DITOL
+
+  # 检测器，可选: NONE, YOLOV3, IA_YOLOV3, TDN, DE_NET
   detector: YOLOV3
-# 跟踪算法，可选: SORT
+
+  # 跟踪器类型，选项包括: SORT（如果启用 tracker_flag 才有效）
   tracker: tracker
-# 检测与跟踪参数
-conf_threshold: 0.4
-iou_threshold: 0.5
-# 数据集路径与设置
+
+# 检测和跟踪器参数设置
+conf_threshold: 0.4  # 目标检测的置信度阈值，低于此值的预测将被忽略
+iou_threshold: 0.5   # NMS中的IOU阈值，控制重叠框的抑制程度
+
+# 数据集配置
 dataset:
-# 雾强度
-# 雾强度
-  fog_strength: 0.5
-  train_ratio: 0.8
-  val_ratio: 0.1
-  batch: 64
-  is_mask: true
-  path: ./data/UAV-M
-  data_path: UAV-benchmark-M
-  label_path: UAV-benchmark-MOTD_v1.0/GT
-  is_clean: true
-  shuffle: true
-# 是否保存可视化结果
+  fog_strength: 0.5        # 加雾强度，值越大雾越浓
+  train_ratio: 0.8         # 训练集占比
+  val_ratio: 0.1           # 验证集占比（测试集比例 = 1 - train_ratio - val_ratio）
+  batch: 64                # 每批次的样本数量
+  is_mask: true            # 是否使用遮罩信息（如果有mask）
+  path: ./data/UAV-M       # 数据存储路径
+  data_path: UAV-benchmark-M      # 原始图像数据路径
+  label_path: UAV-benchmark-MOTD_v1.0/GT  # 标注文件路径（例如Ground Truth）
+  is_clean: true           # 是否清洗无效数据或标注错误
+  shuffle: true            # 是否打乱数据顺序以提升训练泛化能力
+  nums_worker: 8
+
+# 是否保存训练或测试的可视化结果（例如检测框或跟踪轨迹）
 save_output: true
-# 随机种子
+
+# 随机种子，保证结果的可复现性
 seed: 2025
-# 训练参数
+
+# 模型训练参数
 train:
-# 每5个epoch存一次模型
-  checkpoint_interval: 5
-# 每10个step终端更新一次数据
-  log_interval: 10
-  debug: false
-  epochs: 20
-  resume_training: true
-  lr: 0.0001
-  freeze_dehaze: false
-  pretrain_flag: false
-  dehaze_epoch: 5
+  checkpoint_interval: 5   # 每5个epoch保存一次模型权重
+  log_interval: 10         # 每10步在终端输出一次训练日志
+  debug: false             # 是否启用调试模式（更详细的日志信息）
+  epochs: 20               # 总训练轮数
+  resume_training: true    # 是否从上一次中断处继续训练
+  lr: 0.0001               # 学习率
+  freeze_dehaze: false     # 是否冻结去雾网络的权重（不参与训练）
+  pretrain_flag: false     # 是否使用预训练模型初始化
+  dehaze_epoch: 5          # 前多少个epoch只训练去雾模型
