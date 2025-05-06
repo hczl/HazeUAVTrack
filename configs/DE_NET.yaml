@@ -20,10 +20,11 @@ iou_threshold: 0.5
 # 数据集路径与设置
 dataset:
 # 雾强度
-  fog_strength: 0.75
+# 雾强度
+  fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 8
+  batch: 16
   is_mask: true
   path: ./data/UAV-M
   data_path: UAV-benchmark-M

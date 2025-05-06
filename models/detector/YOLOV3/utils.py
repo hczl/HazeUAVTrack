@@ -35,7 +35,7 @@ def convert_targets_to_yolo(target_tensor, image_size):
             # print(f"Warning: Target tensor row has unexpected length {len(target)}. Skipping.")
             continue
 
-        class_id = int(target[8])  # object_category
+        class_id = 1 # object_category
         # Assuming x, y, w, h are already scaled to the new image size
         x = float(target[2])  # top-left x
         y = float(target[3])  # top-left y

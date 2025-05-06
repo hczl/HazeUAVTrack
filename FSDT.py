@@ -4,8 +4,10 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from utils.common import call_function
-
+from utils.common import call_function, preview_batch_with_boxes
+import torchvision.transforms.functional as TF
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 class FSDT(nn.Module):
     def __init__(self, cfg):
@@ -33,6 +35,7 @@ class FSDT(nn.Module):
                                       f"models.trackers.{cfg['method']['tracker']}", cfg)
 
     def train_step(self,tra_batch, clean_batch):
+
         low_res_images, targets, ignore_list = tra_batch
         low_res_images = low_res_images.to(self.device)
         targets_img, _, _ = clean_batch
@@ -52,6 +55,11 @@ class FSDT(nn.Module):
     def train_epoch(self, train_loader, train_clean_loader, epoch):
         epoch_losses = {}
         pbar = tqdm(zip(train_loader, train_clean_loader), total=self.train_batch_nums, desc=f"Epoch {epoch}")
+
+
+        # 调试用：展示前2张图和标注框
+        # preview_batch_with_boxes(train_loader)
+
 
         for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
             loss_dict = self.train_step(tra_batch, clean_batch)
@@ -172,10 +180,6 @@ class FSDT(nn.Module):
             if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
                 # 保存一张预览图
                 try:
-                    import torchvision.transforms.functional as TF
-                    import matplotlib.pyplot as plt
-                    import matplotlib.patches as patches
-
                     self.eval()
                     sample_img = next(iter(val_loader))[0][0].unsqueeze(0).to(self.device)  # 取一张val图像
                     dehazed_img = self.dehaze(sample_img)

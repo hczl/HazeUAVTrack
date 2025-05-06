@@ -201,5 +201,5 @@ def restructure_all_yaml_files():
 if __name__ == "__main__":
     # restructure_all_yaml_files()
     # generate_config_with_comments("my_config.yaml")
-    # update_value_in_all_yaml("dataset.fog_strength", 0.75, "雾强度")
-    update_choice_comment("method.dehaze", "None, DIP, FALCON, AOD_NET, BDN")
+    update_value_in_all_yaml("dataset.fog_strength", 0.5, "雾强度")
+    # update_choice_comment("method.dehaze", "None, DIP, FALCON, AOD_NET, BDN")
