@@ -1,26 +1,15 @@
-# gpu设置
 device: cuda
-# 模型是否启用检测器
 detector_flag: false
-# 模型是否启用追踪器
 tracker_flag: false
-# 模型选择
 method:
-# 生成雾方法，可选: None, MiDaS_Deep
   haze: MiDaS_Deep
-# 去雾方法，可选: None, DIP, FALCON, AOD_NET, BDN
   dehaze: FALCON
-# 检测器，可选: NONE, YOLOV3, IA_YOLOV3, TDN, DE_NET
   detector: YOLOV3
-# 跟踪算法，可选: SORT
   tracker: tracker
-# 检测与跟踪参数
+  track_method: bytetrack
 conf_threshold: 0.4
 iou_threshold: 0.5
-# 数据集路径与设置
 dataset:
-# 雾强度
-# 雾强度
   fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
@@ -31,16 +20,11 @@ dataset:
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: true
   shuffle: true
-# 是否保存可视化结果
   nums_worker: 8
 save_output: true
-# 随机种子
 seed: 2025
-# 训练参数
 train:
-# 每5个epoch存一次模型
   checkpoint_interval: 5
-# 每10个step终端更新一次数据
   log_interval: 10
   debug: false
   epochs: 20

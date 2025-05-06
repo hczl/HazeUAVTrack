@@ -268,6 +268,7 @@ class FSDT(nn.Module):
             # 2. 目标检测
             x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'])
             if self.tracker_flag:
+                x = [det + [0] if len(det) == 5 else det for det in x]
                 # 3. 目标跟踪
                 x = self.tracker.update(x, img, None)
         return x
