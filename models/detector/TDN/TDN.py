@@ -314,8 +314,8 @@ class TDN(nn.Module):
         self.blur_attn = KernelAttentionBlur(in_channels=192)
         self.pos_enc = PositionalEncoder(3, nums_p_channels)
         # self.backbone = MobileNetV3FPNBackbone(out_channels=192)
-        # self.backbone = ResNet18FPNBackbone(out_channels=192)
-        self.backbone = SwinTransformerFPNBackbone(out_channels=192)
+        self.backbone = ResNet18FPNBackbone(out_channels=192)
+        # self.backbone = SwinTransformerFPNBackbone(out_channels=192)
 
         self.hist_compressor_f = nn.Conv2d(nums_f_channels, nums_f_channels // self.hist_len, kernel_size=1)
         self.hist_compressor_p = nn.Conv2d(nums_p_channels, nums_p_channels // self.hist_len, kernel_size=1)

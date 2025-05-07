@@ -121,7 +121,7 @@ class UAVOriginalDataset(Dataset):
 
         # === 缩放处理 ===
         original_w, original_h = img.size
-        new_w, new_h = 640, 320
+        new_w, new_h = 1024, 512
         scale_factor_w = new_w / original_w
         scale_factor_h = new_h / original_h
 

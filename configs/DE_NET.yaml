@@ -1,14 +1,14 @@
 device: cuda
 detector_flag: true
-tracker_flag: false
+tracker_flag: true
 method:
   haze: MiDaS_Deep
   dehaze: NONE
   detector: DE_NET
   tracker: tracker
   track_method: bytetrack
-conf_threshold: 0.4
-iou_threshold: 0.5
+conf_threshold: 0.9
+iou_threshold: 0.7
 dataset:
   fog_strength: 0.5
   train_ratio: 0.8

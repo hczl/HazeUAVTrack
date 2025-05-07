@@ -68,10 +68,4 @@ def focal_loss(inputs, targets, alpha=0.25, gamma=2.0, reduction='sum'):
     BCE_loss = F.binary_cross_entropy(inputs, targets, reduction='none')
     pt = torch.where(targets == 1, inputs, 1 - inputs)
     loss = alpha * (1 - pt) ** gamma * BCE_loss
-    if reduction == 'sum':
-        return loss.sum()
-    elif reduction == 'mean': # 添加 mean 选项
-        return loss.mean()
-    else: # reduction='none'
-        return loss
-
+    return loss.sum() if reduction == 'sum' else loss.mean()

@@ -1,6 +1,7 @@
 # models/trackers/boxmot_tracker.py
 import os
 
+import numpy as np
 import torch
 from boxmot.tracker_zoo import create_tracker
 from torch import nn
@@ -23,20 +24,17 @@ class tracker(nn.Module):
         self.frame_id = 0
 
     def update(self, detections, image_tensor, frame_id=None):
+
         self.frame_id += 1 if frame_id is None else frame_id
 
-        # BoxMOT 要求 detections 是一个 Nx6 的 Tensor: xyxy + conf + cls
-        if not isinstance(detections, torch.Tensor):
-            detections = torch.tensor(detections)
+        if isinstance(detections, list):
+            detections = [d.detach().cpu().numpy() if isinstance(d, torch.Tensor) else np.array(d) for d in detections]
+            detections = np.stack(detections, axis=0)  # shape: [N, 6]
 
         # image_tensor: [1, 3, H, W] -> [H, W, 3] (BoxMOT 接收 numpy 图像)
         img_np = image_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
 
-        tracks = self.tracker.update(detections=detections, img=img_np)
-        results = []
-        for track in tracks:
-            x1, y1, x2, y2 = track.tlbr
-            track_id = track.track_id
-            cls = track.cls
-            results.append([x1, y1, x2, y2, track_id, cls])
-        return results
+        tracks = self.tracker.update(detections, img_np)
+
+
+        return tracks

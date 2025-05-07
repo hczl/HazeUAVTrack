@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from utils.common import call_function, preview_batch_with_boxes
+from utils.common import call_function
 import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -182,35 +182,6 @@ class FSDT(nn.Module):
             # 每checkpoint_interval存储一次模型
             if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
                 # 保存一张预览图
-                try:
-                    self.eval()
-                    sample_img = next(iter(val_loader))[0][0].unsqueeze(0).to(self.device)  # 取一张val图像
-                    dehazed_img = self.dehaze(sample_img)
-
-                    save_dir = os.path.join(dehaze_ckpt, "previews")
-                    os.makedirs(save_dir, exist_ok=True)
-                    preview_path = os.path.join(save_dir, f"epoch_{epoch + 1}.png")
-
-                    fig, ax = plt.subplots(1)
-                    pred_result = self.detector.predict(dehazed_img, conf_thresh=self.cfg['conf_threshold'])
-                    # 假设 pred_result 是 [x1, y1, x2, y2, conf] 格式的列表
-                    img_to_show = TF.to_pil_image(dehazed_img[0].clamp(0, 1).cpu())
-                    ax.imshow(img_to_show)
-
-                    for det in pred_result:
-                        x1, y1, x2, y2, conf = det[:5]
-                        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='r',
-                                                 facecolor='none')
-                        ax.add_patch(rect)
-                        ax.text(x1, y1 - 5, f"{x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f},{conf:.2f}",
-                                color='yellow', fontsize=8, backgroundcolor="black")
-
-                    plt.axis("off")
-                    plt.savefig(preview_path, bbox_inches='tight', pad_inches=0.1)
-                    plt.close()
-                    print(f"预览图已保存至：{preview_path}")
-                except Exception as e:
-                    print(f"生成预览图失败: {e}")
 
                 self.save_model(self.detector, detector_ckpt, self.detector_name,
                                 f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")

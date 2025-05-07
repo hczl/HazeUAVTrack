@@ -18,35 +18,43 @@ def call_function(method_name, module_prefix, *args):
     return func(*args)
 
 
-def preview_batch_with_boxes(loader, class_names=None, window_name='Preview'):
-    import matplotlib.colors as mcolors
-    color_list = list(mcolors.TABLEAU_COLORS.values())
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import torch
+import torchvision.transforms.functional as TF
 
-    for i, (images, targets, _) in enumerate(loader):
-        images = images[:2]  # 仅前两张图像
-        targets = targets[:2]
-        for idx in range(len(images)):
-            img = images[idx].permute(1, 2, 0).cpu().numpy() * 255
-            img = img.astype(np.uint8)
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+def visualize_predictions(image_tensor, decoded_preds, targets, conf_thresh=0.05):
+    """
+    Args:
+        image_tensor: torch.Tensor [3, H, W], 原图像张量（0-1 范围）
+        decoded_preds: Tensor [N, 5], 每行为 [x1, y1, x2, y2, conf]
+        targets: List, 每项为 [cls_id, _, x1, y1, w, h] 的格式
+    """
+    # 准备图像
+    image_np = TF.to_pil_image(image_tensor.cpu()).copy()
+    fig, ax = plt.subplots(1, figsize=(12, 8))
+    ax.imshow(image_np)
 
-            for box in targets[idx]:
-                # 解包标签格式
-                # [frame_index, target_id, x1, y1, w, h, out-of-view, occlusion, category]
-                _, _, x1, y1, w, h, _, _, category = box.tolist()
-                x1, y1, w, h = map(int, [x1, y1, w, h])
-                x2 = x1 + w
-                y2 = y1 + h
-                cls_id = int(category)
-                label = f"{class_names[cls_id]}" if class_names else f"Class {cls_id}"
-                color = color_list[cls_id % len(color_list)]
-                bgr_color = tuple(int(255 * c) for c in mcolors.to_rgb(color))
+    # 绘制预测框
+    for box in decoded_preds:
+        x1, y1, x2, y2, conf = box.tolist()
+        if conf < conf_thresh:
+            continue
+        width, height = x2 - x1, y2 - y1
+        rect = patches.Rectangle((x1, y1), width, height,
+                                 linewidth=2, edgecolor='lime', facecolor='none')
+        ax.add_patch(rect)
+        ax.text(x1, y1 - 5, f'conf={conf:.2f}', color='lime', fontsize=10, weight='bold')
 
-                cv2.rectangle(img, (x1, y1), (x2, y2), bgr_color, 2)
-                cv2.putText(img, label, (x1, max(y1 - 5, 10)), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5, bgr_color, 1, cv2.LINE_AA)
+    # 绘制 GT 框
+    for ann in targets:
+        _, _, x, y, w, h = ann  # [cls_id, _, x, y, w, h]
+        rect = patches.Rectangle((x, y), w, h,
+                                 linewidth=2, edgecolor='red', facecolor='none', linestyle='--')
+        ax.add_patch(rect)
+        ax.text(x, y - 5, 'GT', color='red', fontsize=10)
 
-            cv2.imshow(f"{window_name} - Image {idx+1}", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        break  # 只展示一个 batch
+    ax.set_title('Predictions (green) vs Ground Truth (red)', fontsize=14)
+    plt.axis('off')
+    plt.show()
+

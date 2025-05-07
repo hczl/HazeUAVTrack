@@ -16,24 +16,17 @@ from utils.create import create_model # This should create the FSDT model
 
 # ---- 初始设置 ----
 # os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M0101'  # 输入图像文件夹
+image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M1005'  # 输入图像文件夹
 output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用于保存视频文件)
 video_filename = 'output_video.mp4' # 输出视频文件名
-yaml_path = 'configs/TDN.yaml'  # 你的配置 YAML 文件路径
-max_size = 640  # 图像resize的最大边长，与你的模型输入要求一致
+yaml_path = 'configs/DE_NET.yaml'  # 你的配置 YAML 文件路径
+max_size = 1024  # 图像resize的最大边长，与你的模型输入要求一致
 conf_threshold = 0.25  # 检测置信度阈值
-output_fps = 15.0 # 输出视频的帧率
+output_fps = 30 # 输出视频的帧率
 
 # ---- 加载配置和模型 ----
 print(f"加载配置: {yaml_path}")
 cfg = load_config(yaml_path)
-
-# Force detector flag to True for testing detection
-cfg['detector_flag'] = True
-# Force tracker flag to False if you only want detection output
-cfg['tracker_flag'] = False
-# Disable freeze_dehaze if you want to test the trained dehazer+detector combo
-# cfg['train']['freeze_dehaze'] = False
 
 model = create_model(cfg)  # Assumes create_model returns an instance of FSDT
 model.load_model()  # Load weights using the FSDT's load_model method
@@ -64,25 +57,15 @@ def preprocess_image(image_pil, max_size=640):
 
 def scale_boxes_to_original(boxes, orig_dims, new_dims):
     """Scales predicted boxes from resized image coords back to original image coords."""
-    orig_w, orig_h = orig_dims
-    new_w, new_h = new_dims
-    scale_x = orig_w / new_w
-    scale_y = orig_h / new_h
 
     scaled_boxes = []
+    # print(boxes)
     for box in boxes:
         # box format: [x1, y1, x2, y2, conf, ...]
         # Ensure box has at least 4 coordinates
         if len(box) < 4:
             continue
-        x1, y1, x2, y2 = box[:4]
-        scaled_x1 = x1 * scale_x
-        scaled_y1 = y1 * scale_y
-        scaled_x2 = x2 * scale_x
-        scaled_y2 = y2 * scale_y
-        # Keep confidence and other potential values
-        scaled_box = [scaled_x1, scaled_y1, scaled_x2, scaled_y2] + box[4:]
-        scaled_boxes.append(scaled_box)
+        scaled_boxes.append(box)
     return scaled_boxes
 
 
@@ -134,7 +117,7 @@ with torch.no_grad():
 
         # Get predictions from the model (which uses the dehazed image internally)
         predictions = model.predict(input_tensor)
-        print(predictions)
+        # print(predictions)
         # 3. 缩放预测框到原始图像尺寸
         # predictions is a list of [x1, y1, x2, y2, conf, ...]
         scaled_predictions = scale_boxes_to_original(predictions, orig_dims, new_dims)
@@ -150,10 +133,6 @@ with torch.no_grad():
                 continue # Skip malformed detections
 
             x1, y1, x2, y2, conf = det[:5] # Use only the first 5 elements
-
-            # Apply confidence threshold
-            if conf < conf_threshold:
-                continue # Skip detections below threshold
 
             # Ensure coordinates are integers for OpenCV drawing
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
