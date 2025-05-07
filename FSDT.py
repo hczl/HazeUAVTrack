@@ -37,8 +37,11 @@ class FSDT(nn.Module):
     def train_step(self,tra_batch, clean_batch):
         low_res_images, targets, ignore_list = tra_batch
         low_res_images = low_res_images.to(self.device)
-        targets_img, _, _ = clean_batch
-        targets_img = targets_img.to(self.device)
+        if clean_batch is not None:
+            targets_img, _, _ = clean_batch
+            targets_img = targets_img.to(self.device)
+        else:
+            targets_img = None
         self.optimizer.zero_grad()
         if self.cfg['train']['debug']:
             torch.autograd.set_detect_anomaly(True)
@@ -56,11 +59,13 @@ class FSDT(nn.Module):
     def train_epoch(self, train_loader, train_clean_loader, epoch):
         self.train()
         epoch_losses = {}
-        pbar = tqdm(zip(train_loader, train_clean_loader), total=self.train_batch_nums, desc=f"Epoch {epoch}")
-        # 调试用：展示前2张图和标注框
-        # preview_batch_with_boxes(train_loader)
-        for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
+        if train_clean_loader is not None:
+            loader = zip(train_loader, train_clean_loader)
+        else:
+            loader = ((tra_batch, None) for tra_batch in train_loader)
 
+        pbar = tqdm(loader, total=self.train_batch_nums, desc=f"Epoch {epoch}")
+        for batch_idx, (tra_batch, clean_batch) in enumerate(pbar):
             loss_dict = self.train_step(tra_batch, clean_batch)
 
             # 累加每个 loss 项
@@ -195,12 +200,19 @@ class FSDT(nn.Module):
     def evaluate(self, val_loader, val_clean_loader):
         self.eval()
         epoch_losses = {}
-        pbar = tqdm(zip(val_loader, val_clean_loader), total=self.val_batch_nums, desc=f"val")
+        if val_clean_loader is not None:
+            loader = zip(val_loader, val_clean_loader)
+        else:
+            loader = ((tra_batch, None) for tra_batch in val_loader)
+        pbar = tqdm(loader, total=self.val_batch_nums, desc=f"val")
         for batch_idx, (val_batch, clean_batch) in enumerate(pbar):
             low_res_images, targets, ignore_list = val_batch
             low_res_images = low_res_images.to(self.device)
-            targets_img, _, _ = clean_batch
-            targets_img = targets_img.to(self.device)
+            if clean_batch is not None:
+                targets_img, _, _ = clean_batch
+                targets_img = targets_img.to(self.device)
+            else:
+                targets_img = None
             if self.detector_flag:
                 dehaze_imgs = self.dehaze(low_res_images)
                 loss_dict = self.detector.forward_loss(dehaze_imgs, targets, ignore_list)

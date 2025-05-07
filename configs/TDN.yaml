@@ -18,7 +18,7 @@ dataset:
   path: ./data/UAV-M
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
-  is_clean: true
+  is_clean: false
   shuffle: false
   nums_worker: 8
 save_output: true
