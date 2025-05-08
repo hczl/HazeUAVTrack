@@ -21,7 +21,8 @@ class FSDT(nn.Module):
         self.tracker_flag = cfg['tracker_flag']
         self.freeze_dehaze = cfg['train']['freeze_dehaze']
         self.pretrain_flag = cfg['train']['pretrain_flag']
-        
+        self.conf_thresh = self.cfg['conf_threshold']
+        self.iou_thresh = self.cfg['iou_threshold']
         
         self.dehaze = call_function(cfg['method']['dehaze'],
                                     f"models.dehaze.{cfg['method']['dehaze']}")
@@ -228,7 +229,7 @@ class FSDT(nn.Module):
         if self.detector_flag:
             img = x
             # 2. 目标检测
-            x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'], iou_thresh=self.cfg['iou_threshold'])
+            x = self.detector.predict(img, conf_thresh=self.conf_thresh, iou_thresh=self.conf_thresh)
             if self.tracker_flag:
                 if isinstance(x, list):
                     if not x:
