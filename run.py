@@ -1,8 +1,6 @@
 import os
 import argparse
 
-import torch
-from torch import optim
 os.environ['TORCH_HOME'] = './.torch'
 
 from utils.create import create_model, create_data

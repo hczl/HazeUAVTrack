@@ -43,7 +43,7 @@ def set_field(cm: CommentedMap, key: str, value, comment: str = None, prefix='')
 SUPPORTED = {
     "haze": ["NONE", "MiDaS_Deep"],
     "dehaze": ["NONE", "DIP", "FALCON", "AOD_NET", "BDN", 'FFA'],
-    "detector": ["NONE", "IA_YOLOV3", "IA_YOLOV11", "TDN", 'YOLOV3', 'YOLOV11'],
+    "detector": ["NONE", "IA_YOLOV3", "TDN", 'YOLOV3', 'YOLOV11','DE_NET'],
     "tracker": ["NONE", "tracker"],
     "track_method": ["boosttrack", "botsort", "bytetrack", "strongsort", "deepocsort", "ocsort", "imprassoc"]
 }

@@ -6,9 +6,6 @@ from torch import nn
 from tqdm import tqdm
 
 from utils.common import call_function
-import torchvision.transforms.functional as TF
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
 class FSDT(nn.Module):
     def __init__(self, cfg):
