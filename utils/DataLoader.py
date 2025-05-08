@@ -261,7 +261,7 @@ class UAVDataLoaderBuilder:
     def apply_processing(self, dataset_path):
         """Applies haze or dehaze processing by calling external functions."""
         path = dataset_path
-        if self.haze_method != "None":
+        if self.haze_method != "NONE":
             print(f"尝试应用雾化方法 '{self.haze_method}'...")
             # 传递雾强度参数给处理函数
             path = call_function(self.haze_method, 'models.haze', path, self.fog_strength)

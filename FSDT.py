@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import torch
 from torch import nn
 from tqdm import tqdm
@@ -232,11 +233,25 @@ class FSDT(nn.Module):
             # 2. 目标检测
             x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'], iou_thresh=self.cfg['iou_threshold'])
             if self.tracker_flag:
-                # x = [det + [0] if len(det) == 5 else det for det in x]
-                x = [torch.cat((det, torch.tensor([0.], dtype=det.dtype, device=self.device)), dim=0) if len(det) == 5 else det for det in
-                     x]
+                if isinstance(x, list):
+                    if not x:
+                        num_detection_features = 6
+                        detections_for_tracker = np.empty((0, num_detection_features))
+                    else:
+                        tensors_on_cpu = [t.cpu() for t in x]
+                        stacked_tensor = torch.cat(tensors_on_cpu, dim=0)
+                        detections_for_tracker = stacked_tensor.numpy()
+                elif isinstance(x, torch.Tensor):
+                    detections_for_tracker = x.cpu().numpy()
+                elif isinstance(x, np.ndarray):
+                    # 如果 x 已经是 NumPy 数组，直接使用
+                    detections_for_tracker = x
+                else:
+                    print(f"Warning: Unexpected input type for tracker: {type(x)}")
+                    num_detection_features = 6  # 调整
+                    detections_for_tracker = np.empty((0, num_detection_features))
                 # 3. 目标跟踪
-                x = self.tracker.update(x, img, None)
+                x = self.tracker.update(detections_for_tracker, img, None)
         return x
 
     def save_model(self, component, save_path, model_name, save_name):
@@ -252,7 +267,7 @@ class FSDT(nn.Module):
         print("==> 尝试加载模型继续训练 ...")
         dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', f"{fog_strength_str}_pretrain.pth")
         detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', f"{fog_strength_str}_best.pth")
-
+        print(detector_ckpt_model)
         if os.path.exists(dehaze_ckpt_model) and not self.detector_flag:
             self.dehaze.load_state_dict(torch.load(dehaze_ckpt_model))
             print('去雾模型加载成功')

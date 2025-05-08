@@ -2,8 +2,8 @@ device: cuda
 detector_flag: true
 tracker_flag: false
 method:
-  haze: MiDaS_Deep
-  dehaze: DIP
+  haze: NONE
+  dehaze: NONE
   detector: YOLOV3
   tracker: tracker
   track_method: bytetrack

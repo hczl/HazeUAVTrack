@@ -3,8 +3,8 @@ detector_flag: true
 tracker_flag: true
 method:
   haze: MiDaS_Deep
-  dehaze: AOD_NET
-  detector: YOLOV3
+  dehaze: NONE
+  detector: DE_NET
   tracker: tracker
   track_method: bytetrack
 conf_threshold: 0.5

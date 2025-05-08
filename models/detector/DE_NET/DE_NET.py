@@ -326,7 +326,7 @@ class DE_NET(nn.Module):
         self.eval()
         self.yolov3.eval()
         raw_output = self(high_res_images)
-        return self.decode_output(raw_output, conf_thresh, iou_thresh)[0]
+        return self.decode_output(raw_output, conf_thresh, iou_thresh)
 
     def decode_output(self, raw_output, conf_thresh=0.95, iou_thresh=0.45, max_det=300):
         detections = non_max_suppression(

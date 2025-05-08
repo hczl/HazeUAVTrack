@@ -27,13 +27,8 @@ class tracker(nn.Module):
 
         self.frame_id += 1 if frame_id is None else frame_id
 
-        if isinstance(detections, list):
-            detections = [d.detach().cpu().numpy() if isinstance(d, torch.Tensor) else np.array(d) for d in detections]
-            detections = np.stack(detections, axis=0)  # shape: [N, 6]
-
         # image_tensor: [1, 3, H, W] -> [H, W, 3] (BoxMOT 接收 numpy 图像)
         img_np = image_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
-
         tracks = self.tracker.update(detections, img_np)
 
 

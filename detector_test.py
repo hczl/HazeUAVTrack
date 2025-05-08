@@ -16,7 +16,7 @@ from utils.create import create_model # This should create the FSDT model
 
 # ---- 初始设置 ----
 os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M1005'  # 输入图像文件夹
+image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005'  # 输入图像文件夹
 output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用于保存视频文件)
 video_filename = 'output_video.mp4' # 输出视频文件名
 yaml_path = 'configs/DE_NET.yaml'  # 你的配置 YAML 文件路径

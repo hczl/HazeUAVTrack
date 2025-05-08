@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Processing Web App</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; }
+        #videoContainer { margin-top: 20px; }
+        #videoFeed { max-width: 100%; height: auto; border: 1px solid #ccc; background-color: #eee; } /* Added background for empty state */
+        #controls { margin-bottom: 10px; padding: 15px; border: 1px solid #eee; background-color: #f9f9f9; }
+        #controls div { margin-bottom: 10px; }
+        label { display: inline-block; width: 180px; font-weight: bold; }
+        input[type="text"] { padding: 5px; border: 1px solid #ccc; }
+        button { padding: 8px 15px; margin-right: 10px; cursor: pointer; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { margin-top: 15px; padding: 10px; border: 1px solid #eee; background-color: #f9f9f9; }
+        #status span { font-weight: normal; }
+        .hint { font-size: 0.9em; color: #555; margin-left: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Video Processing with Model</h1>
+
+    <div id="controls">
+        <form id="processingForm">
+            <div>
+                <label for="imageFolder">Video Frames Folder Path:</label>
+                <input type="text" id="imageFolder" name="image_folder" size="60" required value="{{ default_image_folder }}">
+                <span class="hint">Enter path relative to script directory (e.g., data/my_video) or full path.</span>
+            </div>
+            <div>
+                <label for="yamlPath">Model YAML Path:</label>
+                <input type="text" id="yamlPath" name="yaml_path" size="60" required value="{{ default_yaml_path }}">
+                <span class="hint">Enter path relative to script directory (e.g., configs/my_model.yaml) or full path.</span>
+            </div>
+            <br>
+            <button type="button" id="startButton">Start Processing</button>
+            <button type="button" id="stopButton" disabled>Stop Processing</button>
+        </form>
+        <p style="font-size: 0.9em; color: #c0392b;">
+            Note: Due to browser security restrictions, a native file/folder picker cannot be opened directly from this web page. Please manually copy and paste the path into the input field.
+        </p>
+    </div>
+
+    <div id="status">
+        Processing Status: <span id="processingStatus">Idle</span> | Estimated FPS: <span id="fpsDisplay">N/A</span>
+    </div>
+
+    <div id="videoContainer">
+        <h2>Live Feed</h2>
+        <!-- Add a placeholder or message when the feed is not active -->
+        <img id="videoFeed" src="" alt="Video feed will appear here when processing starts.">
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
