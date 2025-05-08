@@ -41,9 +41,7 @@ except ImportError as e:
 # video_filename = 'output_video.mp4' # Not saving video in live display
 yaml_path = 'configs/DE_NET.yaml'  # Your config YAML file path
 max_size = 1024  # Image resize max side length, consistent with your model
-# conf_threshold = 0.25  # Initial threshold, controlled by slider
-# iou_threshold = 0.4 # Initial threshold, controlled by slider (assuming your model uses this internally or in post-processing)
-# output_fps = 30 # Display FPS, not saving video FPS
+
 
 # ---- Image Preprocessing Transform (defined once) ----
 transform = transforms.Compose([transforms.ToTensor()])

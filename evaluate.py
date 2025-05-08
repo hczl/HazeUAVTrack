@@ -14,6 +14,7 @@ from utils.create import create_model
 from utils.metrics import compute_map, compute_f1, compute_mota
 from utils.transform import load_annotations, scale_ground_truth_boxes, scale_ignore_regions
 
+os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
 
 def preprocess(image_pil):
     w, h = image_pil.size
@@ -29,7 +30,7 @@ def preprocess(image_pil):
 image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M1005'
 yaml_path = 'configs/DE_NET.yaml'
 output_fps = 30
-max_size = 640
+max_size = 1024
 # 加载真实标签和忽略区域
 
 # ---- 加载模型和配置 ----

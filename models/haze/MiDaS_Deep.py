@@ -10,13 +10,14 @@ def MiDaS_Deep(input_path, fog_strength):
     input_path = Path(input_path)
     # print(input_path)
     dataset_name = input_path.name
-    base_output = input_path.parent /Path(f"MiDaS_Deep_{dataset_name}")
+    fog_strength_str = f"fog_{int(fog_strength * 100):03d}"  # 例如 0.5 -> 'fog_050'
+    base_output = input_path.parent / Path(f"MiDaS_Deep_{dataset_name}_{fog_strength_str}")
     depth_path = base_output / 'depth_temp'
     if depth_path.exists():
         shutil.rmtree(depth_path)
     hazy_path = base_output
-    if os.path.exists(input_path.parent / f"MiDaS_Deep_{dataset_name}"):
-        return input_path.parent / f"MiDaS_Deep_{dataset_name}"
+    if os.path.exists(base_output):
+        return base_output
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model_type = 'DPT_Large'
@@ -106,4 +107,5 @@ def MiDaS_Deep(input_path, fog_strength):
     if depth_path.exists():
         shutil.rmtree(depth_path)
 
-    return str(hazy_path.resolve())
+    return str(base_output.resolve())
+

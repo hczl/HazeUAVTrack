@@ -21,7 +21,6 @@ output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用�
 video_filename = 'output_video.mp4' # 输出视频文件名
 yaml_path = 'configs/DE_NET.yaml'  # 你的配置 YAML 文件路径
 max_size = 1024  # 图像resize的最大边长，与你的模型输入要求一致
-conf_threshold = 0.25  # 检测置信度阈值
 output_fps = 30 # 输出视频的帧率
 
 # ---- 加载配置和模型 ----
@@ -121,7 +120,7 @@ with torch.no_grad():
         # 3. 缩放预测框到原始图像尺寸
         # predictions is a list of [x1, y1, x2, y2, conf, ...]
         scaled_predictions = scale_boxes_to_original(predictions, orig_dims, new_dims)
-
+        # print(scaled_predictions)
         # 4. 在图像上绘制结果
         img_to_draw = dehazed_np.copy() # Draw on a copy to be safe
 

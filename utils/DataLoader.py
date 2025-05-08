@@ -75,7 +75,6 @@ class UAVOriginalDataset(Dataset):
         self.ignore_files = ignore_files # 存储帧级忽略文件路径
         self.transform = transform
         self.is_mask = is_mask # 控制是否加载和返回忽略信息
-
     def __len__(self):
         return len(self.image_files)
 
@@ -169,7 +168,6 @@ class UAVDataLoaderBuilder:
         self.is_mask = config['dataset']['is_mask'] # 保留这个配置，用于控制是否加载和返回忽略信息
         self.is_clean = config['dataset'].get('is_clean', False) # 默认为 False
         self.fog_strength = config['dataset'].get('fog_strength', 0.5) # 默认为 0.5
-
         # 定义路径
         self.original_image_root = os.path.join(self.root, config['dataset']['data_path'])
         self.label_root = os.path.join(self.root, config['dataset']['label_path'])

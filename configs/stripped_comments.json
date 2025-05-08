@@ -12,5 +12,10 @@
   "save_output": "是否保存检测/跟踪结果图像",
   "seed": "随机种子（保证结果可复现）",
   "train.checkpoint_interval": "每N个epoch保存模型",
-  "train.dehaze_epoch": "前N轮仅训练去雾网络"
+  "train.dehaze_epoch": "前N轮仅训练去雾网络",
+  "train.lr": "# 将基础学习率提高到 1e-4 或 5e-4",
+  "train.warmup_epochs": "# 例如，前 5 个 epoch 进行 warmup",
+  "train.warmup_start_factor": "# 从基础学习率的 1% 开始",
+  "train.lr_decay_step": "# 例如，每 30 个 epoch 衰减一次",
+  "train.lr_decay_gamma": "# 衰减因子，学习率乘以 0.1"
 }

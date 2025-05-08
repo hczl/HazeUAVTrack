@@ -3,7 +3,7 @@ detector_flag: true
 tracker_flag: false
 method:
   haze: MiDaS_Deep
-  dehaze: NONE
+  dehaze: AOD_NET
   detector: IA_YOLOV3
   tracker: tracker
   track_method: bytetrack
@@ -18,7 +18,7 @@ dataset:
   path: ./data/UAV-M
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
-  is_clean: False
+  is_clean: false
   shuffle: true
   nums_worker: 8
 save_output: true

@@ -98,42 +98,22 @@ class FSDT(nn.Module):
 
     def train_model(self, train_loader, val_loader, train_clean_loader, val_clean_loader, num_epochs=100):
         # 训练前预处理
+        fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
         self.train_batch_nums = len(train_loader)
         self.val_batch_nums = len(val_loader)
         best_loss = float('inf')
         dehaze_ckpt = f'models/dehaze/{self.dehaze_name}/ckpt'
         detector_ckpt = f'models/detector/{self.detector_name}/ckpt'
-        combo_ckpt_model = os.path.join(
-            f'models/dehaze/{self.dehaze_name}/ckpt',
-            f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_0.pth"
-        )
-        if os.path.exists(combo_ckpt_model):
-            print(f"==> 加载组合模型权重：{combo_ckpt_model}")
-            self.dehaze.load_state_dict(torch.load(combo_ckpt_model, map_location=self.device))
-            detector_combo_ckpt = os.path.join(
-                f'models/detector/{self.detector_name}/ckpt',
-                f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_0.pth"
-            )
-            if os.path.exists(detector_combo_ckpt):
-                self.detector.load_state_dict(torch.load(detector_combo_ckpt, map_location=self.device))
-                print(f"==> 加载检测器组合模型权重：{detector_combo_ckpt}")
-            else:
-                print("==> 未找到检测器组合模型，仅加载去雾模型")
         if self.cfg['train']['resume_training']:
             # 检测是否加载成功
             dehaze_loaded = False
             detector_loaded = False
             print("==> 尝试加载模型继续训练 ...")
-            dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', 'pretrain.pth')
-            dehaze_detector_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt',
-                                                 f"{self.detector_name}_pretrain.pth")
-            detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', 'best.pth')
+            dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', f'{fog_strength_str}_pretrain.pth')
+            detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', f'{fog_strength_str}_best.pth')
 
             if os.path.exists(dehaze_ckpt_model):
                 self.dehaze.load_state_dict(torch.load(dehaze_ckpt_model))
-                dehaze_loaded = True
-            elif os.path.exists(dehaze_detector_model):
-                self.detector.load_state_dict(torch.load(dehaze_detector_model))
                 dehaze_loaded = True
             else:
                 print("未找到预训练去雾模型，重新训练。")
@@ -142,7 +122,7 @@ class FSDT(nn.Module):
                 detector_loaded = True
             else:
                 print("未找到已有检测模型，重新训练。")
-            if (dehaze_loaded and detector_loaded) or dehaze_loaded:
+            if (dehaze_loaded and detector_loaded) or (dehaze_loaded and not self.freeze_dehaze):
                 best_loss = self.evaluate(val_loader, val_clean_loader)
 
         if self.freeze_dehaze:
@@ -175,19 +155,14 @@ class FSDT(nn.Module):
                 # 如果此时检测器在训练
                 if self.detector_flag:
                     best_loss = val_loss
-                    self.save_model(self.detector,detector_ckpt, self.detector_name,f"best.pth")
-                    # 如果同时不冻结去雾模型
-                    if not self.freeze_dehaze:
-                        self.save_model(self.dehaze, dehaze_ckpt, self.dehaze_name,
-                                        f"{self.detector_name}_pretrain.pth")
+                    self.save_model(self.detector,detector_ckpt, self.detector_name,f"{fog_strength_str}_best.pth")
                 # 此时去雾模块在训练
                 elif not self.freeze_dehaze:
                     best_loss = val_loss
-                    self.save_model(self.dehaze,dehaze_ckpt, self.dehaze_name,f"pretrain.pth")
+                    self.save_model(self.dehaze,dehaze_ckpt, self.dehaze_name,f"{fog_strength_str}_pretrain.pth")
             # 每checkpoint_interval存储一次模型
             if epoch % self.cfg['train']['checkpoint_interval'] == 0 and self.detector_flag:
                 # 保存一张预览图
-
                 self.save_model(self.detector, detector_ckpt, self.detector_name,
                                 f"{self.dehaze_name}_{self.detector_name}_ckpt_epoch_{epoch + 1}.pth")
                 if not self.freeze_dehaze:
@@ -255,9 +230,11 @@ class FSDT(nn.Module):
         if self.detector_flag:
             img = x
             # 2. 目标检测
-            x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'])
+            x = self.detector.predict(img, conf_thresh=self.cfg['conf_threshold'], iou_thresh=self.cfg['iou_threshold'])
             if self.tracker_flag:
-                x = [det + [0] if len(det) == 5 else det for det in x]
+                # x = [det + [0] if len(det) == 5 else det for det in x]
+                x = [torch.cat((det, torch.tensor([0.], dtype=det.dtype, device=self.device)), dim=0) if len(det) == 5 else det for det in
+                     x]
                 # 3. 目标跟踪
                 x = self.tracker.update(x, img, None)
         return x
@@ -265,24 +242,21 @@ class FSDT(nn.Module):
     def save_model(self, component, save_path, model_name, save_name):
         save_dir = os.path.join("", save_path)
         os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, f"{save_name}")
+        fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
+        save_path = os.path.join(save_dir, f"{fog_strength_str}_{save_name}")
         torch.save(component.state_dict(), save_path)
         print(f"{model_name} 模块已保存到: {save_path}")
 
     def load_model(self):
+        fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
         print("==> 尝试加载模型继续训练 ...")
-        dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', 'pretrain.pth')
-        dehaze_detector_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt',
-                                             f"{self.detector_name}_pretrain.pth")
-        detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', 'best.pth')
+        dehaze_ckpt_model = os.path.join(f'models/dehaze/{self.dehaze_name}/ckpt', f"{fog_strength_str}_pretrain.pth")
+        detector_ckpt_model = os.path.join(f'models/detector/{self.detector_name}/ckpt', f"{fog_strength_str}_best.pth")
 
         if os.path.exists(dehaze_ckpt_model) and not self.detector_flag:
             self.dehaze.load_state_dict(torch.load(dehaze_ckpt_model))
             print('去雾模型加载成功')
         elif self.detector_flag:
-            if os.path.exists(dehaze_detector_model):
-                self.dehaze.load_state_dict(torch.load(dehaze_detector_model))
-                print('去雾_检测模型加载成功')
             if os.path.exists(detector_ckpt_model):
                 self.detector.load_state_dict(torch.load(detector_ckpt_model))
                 print('检测模型加载成功')

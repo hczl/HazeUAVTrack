@@ -3,11 +3,11 @@ detector_flag: true
 tracker_flag: false
 method:
   haze: MiDaS_Deep
-  dehaze: NONE
+  dehaze: AOD_NET
   detector: TDN
   tracker: tracker
   track_method: bytetrack
-conf_threshold: 0.4
+conf_threshold: 0.1
 iou_threshold: 0.5
 dataset:
   fog_strength: 0.5
@@ -20,7 +20,7 @@ dataset:
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: false
   shuffle: false
-  nums_worker: 8
+  nums_worker: 2
 save_output: true
 seed: 2025
 train:
@@ -29,11 +29,11 @@ train:
   debug: false
   epochs: 80
   resume_training: false
-  lr: 0.0001 # 将基础学习率提高到 1e-4 或 5e-4
+  lr: 0.0001
   freeze_dehaze: true
   pretrain_flag: false
   dehaze_epoch: 5
-  warmup_epochs: 5 # 例如，前 5 个 epoch 进行 warmup
-  warmup_start_factor: 0.01 # 从基础学习率的 1% 开始
-  lr_decay_step: 30 # 例如，每 30 个 epoch 衰减一次
-  lr_decay_gamma: 0.1 # 衰减因子，学习率乘以 0.1
+  warmup_epochs: 5
+  warmup_start_factor: 0.01
+  lr_decay_step: 30
+  lr_decay_gamma: 0.1

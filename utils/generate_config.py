@@ -126,7 +126,7 @@ def merge_and_validate(target, template):
                     print(f"[警告] method.{subkey} 值 '{val}' 非法，重置为默认值 '{default_val}'")
                     target['method'][subkey] = default_val
 
-def update_yaml_dir(directory, comment_out_path=None):
+def update_yaml_dir(directory, comment_out_path=None, modifications=None):
     for filename in os.listdir(directory):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filepath = os.path.join(directory, filename)
@@ -135,14 +135,37 @@ def update_yaml_dir(directory, comment_out_path=None):
             strip_comments(data)
             template = get_template()
             merge_and_validate(data, template)
+
+            # 应用字段修改
+            if modifications:
+                apply_modifications(data, modifications)
+
             with open(filepath, 'w', encoding='utf-8') as f:
                 yaml.dump(data, f)
-            print(f"[完成] 已清除并覆盖注释：{filename}")
+            print(f"[完成] 已处理文件：{filename}")
 
     if comment_out_path:
         with open(comment_out_path, 'w', encoding='utf-8') as f:
             json.dump(COMMENTS, f, ensure_ascii=False, indent=2)
         print(f"[完成] 注释已另存至：{comment_out_path}")
 
+def apply_modifications(cfg: CommentedMap, modifications: dict, prefix=''):
+    for key, new_value in modifications.items():
+        if '.' in key:
+            current_key, rest = key.split('.', 1)
+            if current_key in cfg and isinstance(cfg[current_key], dict):
+                apply_modifications(cfg[current_key], {rest: new_value}, prefix=f"{prefix}.{current_key}" if prefix else current_key)
+        else:
+            if key in cfg:
+                cfg[key] = new_value
+                full_key = f"{prefix}.{key}" if prefix else key
+                print(f"[修改] 已更新 {full_key} 为 {new_value}")
+
 # 执行
-update_yaml_dir('../configs', comment_out_path='../configs/stripped_comments.json')
+# update_yaml_dir('../configs', comment_out_path='../configs/stripped_comments.json')
+
+modifications = {
+    "dataset.fog_strength": 0.5,
+}
+
+update_yaml_dir('../configs', comment_out_path='../configs/stripped_comments.json', modifications=modifications)
