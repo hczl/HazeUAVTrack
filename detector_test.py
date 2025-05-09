@@ -19,7 +19,7 @@ os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
 image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005'  # 输入图像文件夹
 output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用于保存视频文件)
 video_filename = 'output_video.mp4' # 输出视频文件名
-yaml_path = 'configs/DE_NET.yaml'  # 你的配置 YAML 文件路径
+yaml_path = 'configs/TDN.yaml'  # 你的配置 YAML 文件路径
 max_size = 1024  # 图像resize的最大边长，与你的模型输入要求一致
 output_fps = 30 # 输出视频的帧率
 

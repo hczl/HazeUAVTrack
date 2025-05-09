@@ -257,6 +257,9 @@ class DetectionHead(nn.Module):
 class TDN(nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        self.cfg = cfg
+        self.iou = 0.1
+        self._use_mse = False
         model_cfg_dict = {}
         try:
              model_cfg_dict = load_config('models/detector/TDN/TDN_config.yaml')['model']
@@ -276,7 +279,7 @@ class TDN(nn.Module):
         self.ConvGRU = MultiFPNConvGRU(channels=self.backbone_channel)
 
         self.detection = DetectionHead(in_channels=self.backbone_channel)
-        self._hist_f = None
+        self._hist_f = [None] * 4
 
     def forward(self, x, training=False):
         f_t = self.backbone(x)
@@ -284,8 +287,8 @@ class TDN(nn.Module):
         attn_f = [self.attn[i](x_i) for i, x_i in enumerate(f_t)]
         F = 4
         B, C = attn_f[0].shape[:2]
-        assert B % self.step == 0, "帧数必须是 step 的整数倍"
         if training:
+            assert B % self.step == 0, "帧数必须是 step 的整数倍"
             hist = [None] * F
             for i in range(self.step):
                 indices = torch.arange(i, B, self.step)
@@ -345,7 +348,7 @@ class TDN(nn.Module):
                   if gt_boxes_tensor is not None and gt_boxes_tensor.numel() > 0:
                        ious_gt = compute_iou(pred_boxes_decoded, gt_boxes_tensor)
                        best_iou_gt, _ = ious_gt.max(dim=1)
-                       conf_target = (best_iou_gt > 0.1).float()
+                       conf_target = best_iou_gt.clamp(0, 1)
                        non_ignored_targets_conf = conf_target[non_ignored_mask]
                   else:
                        non_ignored_targets_conf = torch.zeros_like(non_ignored_preds_conf)
@@ -363,7 +366,7 @@ class TDN(nn.Module):
             best_iou_gt, best_gt_idx = ious_gt.max(dim=1)
             current_ignore_mask = ignore_mask if ignore_mask is not None else torch.zeros_like(pred_confs_activated, dtype=torch.bool)
 
-            match_mask = (best_iou_gt > 0.1) & (~current_ignore_mask)
+            match_mask = (best_iou_gt > self.iou) & (~current_ignore_mask)
 
             matched_pred_raw = raw_preds_flat[match_mask] # Get RAW predictions for bbox loss
             matched_gt_boxes = gt_boxes_tensor[best_gt_idx[match_mask]]
@@ -445,7 +448,7 @@ class TDN(nn.Module):
         denom = num_images_in_batch * num_levels
         final_avg_conf_loss = batch_conf_loss / denom
         final_avg_bbox_loss = batch_bbox_loss / denom
-        final_avg_total_loss = final_avg_conf_loss + final_avg_bbox_loss
+        final_avg_total_loss = 2.0 * final_avg_conf_loss + final_avg_bbox_loss
 
         log_dict = {
             'total_loss': final_avg_total_loss,
@@ -489,6 +492,11 @@ class TDN(nn.Module):
          return torch.stack([x1, y1, x2, y2], dim=1)
 
     def forward_loss(self, dehaze_imgs, targets, ignore_list=None):
+        B = dehaze_imgs.shape[0]
+        dehaze_imgs = dehaze_imgs[:B - B % 4]
+        targets = targets[:B - B % 4]
+        if ignore_list is not None:
+            ignore_list = ignore_list[:B - B % 4]
         B, _, H_img, W_img = dehaze_imgs.shape
         indices = np.arange(self.step - 1, B, self.step).tolist()
         targets = [targets[i] for i in indices]

@@ -10,17 +10,17 @@ method:
 conf_threshold: 0.4
 iou_threshold: 0.5
 dataset:
-  fog_strength: 0.5
+  fog_strength: 0.75
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 32
+  batch: 64
   is_mask: true
   path: ./data/UAV-M
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: true
   shuffle: true
-  nums_worker: 8
+  nums_worker: 16
 save_output: true
 seed: 2025
 train:

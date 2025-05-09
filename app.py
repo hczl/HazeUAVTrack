@@ -28,7 +28,7 @@ except ImportError as e:
     print("Please ensure 'utils' folder with config.py and create.py is in your project path.")
     # Exit or handle the error appropriately if utilities are essential
     raise
-
+os.environ['TORCH_HOME'] = './.torch'
 # ---- Global/Shared Variables for Thread Communication ----
 current_frame_data = None # Holds (PhotoImage, status_text) or similar
 processing_running = False # Flag to indicate if the worker thread is active

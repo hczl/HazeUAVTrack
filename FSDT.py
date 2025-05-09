@@ -133,7 +133,9 @@ class FSDT(nn.Module):
 
         for epoch in range(0, num_epochs):
             if hasattr(self.detector, '_use_mse'):
-                self.detector._use_mse = (epoch < 2)  # 训练前两轮使用 MSE
+                self.detector._use_mse = (epoch < 4)  # 训练前四轮使用 MSE
+            if hasattr(self.detector, 'iou'):
+                self.detector._use_mse = 0.5 if(epoch > 2) else 0.3
             # pretrain
             if not self.freeze_dehaze and epoch > self.cfg['train']['dehaze_epoch'] and self.pretrain_flag:
                 self.detector_flag = True
@@ -230,6 +232,7 @@ class FSDT(nn.Module):
             img = x
             # 2. 目标检测
             x = self.detector.predict(img, conf_thresh=self.conf_thresh, iou_thresh=self.conf_thresh)
+
             if self.tracker_flag:
                 if isinstance(x, list):
                     if not x:
@@ -255,8 +258,8 @@ class FSDT(nn.Module):
     def save_model(self, component, save_path, model_name, save_name):
         save_dir = os.path.join("", save_path)
         os.makedirs(save_dir, exist_ok=True)
-        fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
-        save_path = os.path.join(save_dir, f"{fog_strength_str}_{save_name}")
+        # fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
+        save_path = os.path.join(save_dir, f"{save_name}")
         torch.save(component.state_dict(), save_path)
         print(f"{model_name} 模块已保存到: {save_path}")
 
