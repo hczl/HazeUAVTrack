@@ -27,7 +27,7 @@ os.makedirs(result_dir, exist_ok=True)
 os.makedirs(video_dir, exist_ok=True)
 
 transform = transforms.ToTensor()
-dehazes = ['DIP', 'BDN', 'AOD_NET']
+dehazes = ['DIP', 'AD_NET', 'AOD_NET']
 yaml_path = 'configs/DIP.yaml'
 
 fps_results = {}

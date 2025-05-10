@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/TDN.yaml",
+        default="configs/DRIFT_NET.yaml",
         help="配置文件路径（默认: configs/exp1.yaml）"
     )
     args = parser.parse_args()

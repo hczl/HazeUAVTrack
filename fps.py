@@ -21,7 +21,7 @@ transform = transforms.Compose([transforms.ToTensor()])
 max_size = 640
 
 # ---- 去雾方法和检测器 ----
-yaml_paths = ['configs/TDN.yaml']
+yaml_paths = ['configs/DRIFT_NET.yaml']
 fps_results = {}
 
 # ---- 获取图像列表 ----

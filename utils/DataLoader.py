@@ -44,23 +44,28 @@ def custom_collate_fn(batch):
         images, labels, ignores = zip(*batch)
     else:
         images, labels = zip(*batch)
-        ignores = None # 或者可以创建一个空的ignores列表
+        ignores = None  # 或者可以创建一个空的ignores列表
 
     # 堆叠图像
     images = torch.stack(images, dim=0)
 
     label_format_size = 9
     labels = [label.detach().clone().float() if isinstance(label, torch.Tensor)
-              else torch.empty((0, label_format_size),dtype=torch.float32) for label in labels]
+              else torch.empty((0, label_format_size), dtype=torch.float32) for label in labels]
 
     # 处理忽略列表 (如果存在)
     if has_ignores and ignores is not None:
+
         ignore_format_size = 9
-        ignores = [ignores.detach().clone().float() if isinstance(ignores, torch.Tensor)
+        # 确保每个元素都是Tensor并进行深拷贝
+        ignores = [ignore.detach().clone().float() if isinstance(ignore, torch.Tensor)
                    else torch.empty((0, ignore_format_size), dtype=torch.float32) for ignore in ignores]
+
+
         return images, labels, ignores
     else:
         return images, labels
+
 
 # UAVOriginalDataset 需要修改以接收 is_mask 参数和读取忽略文件 (现在格式与标签文件相同)
 class UAVOriginalDataset(Dataset):
@@ -147,7 +152,6 @@ class UAVOriginalDataset(Dataset):
 
         if self.transform:
             img = self.transform(img)
-
         return (img, annotations, ignore_annotations) if self.is_mask else (img, annotations)
 
 
@@ -162,6 +166,7 @@ class UAVDataLoaderBuilder:
         """
         使用配置设置初始化构建器。
         """
+        self.cfg = config
         self.seed = config['seed']
         self.root = config['dataset']['path']
         self.haze_method = config['method']['haze']
@@ -264,7 +269,7 @@ class UAVDataLoaderBuilder:
         if self.haze_method != "NONE":
             print(f"尝试应用雾化方法 '{self.haze_method}'...")
             # 传递雾强度参数给处理函数
-            path = call_function(self.haze_method, 'models.haze', path, self.fog_strength)
+            path = call_function(self.haze_method, 'models.haze', path, self.fog_strength, self.cfg['dataset']['nums_worker'])
         return path
 
     # parse_labels_to_frames 保持不变，用于主标签

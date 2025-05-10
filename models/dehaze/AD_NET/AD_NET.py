@@ -51,7 +51,7 @@ class CBAMBlock(nn.Module):
         return out + x  # 残差连接
 
 
-class BDN(nn.Module):
+class AD_NET(nn.Module):
     def __init__(self, in_channels=3):
         super().__init__()
         self.in_channels = in_channels

@@ -42,8 +42,8 @@ def set_field(cm: CommentedMap, key: str, value, comment: str = None, prefix='')
 
 SUPPORTED = {
     "haze": ["NONE", "MiDaS_Deep"],
-    "dehaze": ["NONE", "DIP", "FALCON", "AOD_NET", "BDN", 'FFA'],
-    "detector": ["NONE", "IA_YOLOV3", "TDN", 'YOLOV3', 'YOLOV11','DE_NET'],
+    "dehaze": ["NONE", "DIP", "FALCON", "AOD_NET", "AD_NET", 'FFA'],
+    "detector": ["NONE", "IA_YOLOV3", "DRIFT_NET", 'YOLOV3', 'YOLOV11','DE_NET'],
     "tracker": ["NONE", "tracker"],
     "track_method": ["boosttrack", "botsort", "bytetrack", "strongsort", "deepocsort", "ocsort", "imprassoc"]
 }
@@ -57,8 +57,8 @@ def get_template():
     method = CommentedMap()
     prefix = 'method'
     set_field(method, 'haze', 'MiDaS_Deep', '生成雾图像的方法（None 或 MiDaS_Deep）', prefix)
-    set_field(method, 'dehaze', 'AOD_NET', '去雾方法：None、DIP、FALCON、AOD_NET、BDN', prefix)
-    set_field(method, 'detector', 'YOLOV3', '检测器类型：None、YOLOV3、IA_YOLOV3、TDN', prefix)
+    set_field(method, 'dehaze', 'AOD_NET', '去雾方法：None、DIP、FALCON、AOD_NET、AD_NET', prefix)
+    set_field(method, 'detector', 'YOLOV3', '检测器类型：None、YOLOV3、IA_YOLOV3、DRIFT_NET', prefix)
     set_field(method, 'tracker', 'tracker', None, prefix)
     set_field(method, 'track_method', 'bytetrack',
               '跟踪算法，可选: boosttrack, botsort, bytetrack, strongsort, deepocsort, ocsort, imprassoc', prefix)

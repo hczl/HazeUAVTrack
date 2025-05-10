@@ -12,14 +12,14 @@ from tqdm import tqdm
 
 # Assuming these utility functions are in your project
 from utils.config import load_config
-from utils.create import create_model # This should create the FSDT model
+from utils.create import create_model # This should create the HazeUAVTrack model
 
 # ---- 初始设置 ----
 os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
 image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005'  # 输入图像文件夹
 output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用于保存视频文件)
 video_filename = 'output_video.mp4' # 输出视频文件名
-yaml_path = 'configs/TDN.yaml'  # 你的配置 YAML 文件路径
+yaml_path = 'configs/DRIFT_NET.yaml'  # 你的配置 YAML 文件路径
 max_size = 1024  # 图像resize的最大边长，与你的模型输入要求一致
 output_fps = 30 # 输出视频的帧率
 
@@ -27,8 +27,8 @@ output_fps = 30 # 输出视频的帧率
 print(f"加载配置: {yaml_path}")
 cfg = load_config(yaml_path)
 
-model = create_model(cfg)  # Assumes create_model returns an instance of FSDT
-model.load_model()  # Load weights using the FSDT's load_model method
+model = create_model(cfg)  # Assumes create_model returns an instance of HazeUAVTrack
+model.load_model()  # Load weights using the HazeUAVTrack's load_model method
 device = torch.device(cfg['device'] if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.eval()  # Set model to evaluation mode

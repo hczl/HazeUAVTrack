@@ -3,7 +3,7 @@ from torch import optim
 from torch.optim.lr_scheduler import SequentialLR, LinearLR, StepLR
 from torch.utils.data import DataLoader
 
-from FSDT import FSDT
+from HazeUAVTrack import HazeUAVTrack
 from utils.DataLoader import UAVDataLoaderBuilder, custom_collate_fn, IndexSampler
 
 from torchvision import transforms
@@ -66,7 +66,7 @@ def create_data(cfg):
     return train_loader, val_loader, test_loader, train_clean_loader, val_clean_loader
 
 def create_model(cfg):
-    model = FSDT(cfg)
+    model = HazeUAVTrack(cfg)
     model.to(cfg['device'])
     model.device = cfg['device']  # Add device attribute for model to use
 

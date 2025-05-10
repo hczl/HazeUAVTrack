@@ -1,25 +1,25 @@
 device: cuda
-detector_flag: true
+detector_flag: false
 tracker_flag: false
 method:
   haze: MiDaS_Deep
-  dehaze: NONE
-  detector: TDN
+  dehaze: AD_NET
+  detector: YOLOV3
   tracker: tracker
   track_method: bytetrack
-conf_threshold: 0.5
+conf_threshold: 0.4
 iou_threshold: 0.5
 dataset:
   fog_strength: 0.75
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 12
+  batch: 16
   is_mask: true
   path: ./data/UAV-M
   data_path: UAV-benchmark-M
   label_path: UAV-benchmark-MOTD_v1.0/GT
-  is_clean: false
-  shuffle: false
+  is_clean: true
+  shuffle: true
   nums_worker: 16
 save_output: true
 seed: 2025
@@ -27,13 +27,9 @@ train:
   checkpoint_interval: 5
   log_interval: 10
   debug: false
-  epochs: 80
-  resume_training: false
+  epochs: 20
+  resume_training: true
   lr: 0.0001
-  freeze_dehaze: true
+  freeze_dehaze: false
   pretrain_flag: false
   dehaze_epoch: 5
-  warmup_epochs: 5
-  warmup_start_factor: 0.01
-  lr_decay_step: 30
-  lr_decay_gamma: 0.1

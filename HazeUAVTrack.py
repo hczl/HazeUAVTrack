@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from utils.common import call_function
 
-class FSDT(nn.Module):
+class HazeUAVTrack(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.val_batch_nums = None
@@ -121,7 +121,9 @@ class FSDT(nn.Module):
                 detector_loaded = True
             else:
                 print("未找到已有检测模型，重新训练。")
-            if (dehaze_loaded and detector_loaded) or (dehaze_loaded and not self.freeze_dehaze):
+            if ((dehaze_loaded and detector_loaded) or
+                    (dehaze_loaded and not self.freeze_dehaze) or
+                    (self.freeze_dehaze and detector_loaded)):
                 best_loss = self.evaluate(val_loader, val_clean_loader)
 
         if self.freeze_dehaze:

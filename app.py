@@ -12,14 +12,6 @@ import torchvision.transforms.functional as F
 from torchvision import transforms
 from tqdm import tqdm # Using tqdm for console output in the worker thread
 
-# Assuming these utility functions are in your project
-# Ensure your project structure allows importing from 'utils'
-# Example:
-# project_root/
-# ├── your_ui_script.py
-# └── utils/
-#     ├── config.py    # 包含 load_config 函数
-#     └── create.py    # 包含 create_model 函数
 try:
     from utils.config import load_config
     from utils.create import create_model
@@ -97,14 +89,12 @@ def draw_boxes(image_np_original_size, detections):
 
     # We no longer filter by confidence here, assuming the model output is already filtered
     filtered_detections = detections # Use all detections provided
-
     for det in filtered_detections:
         # Ensure the detection has at least 5 elements (x1, y1, x2, y2, conf)
         if len(det) < 5:
             continue # Skip malformed detections
 
         x1, y1, x2, y2, conf = det[:5] # Use only the first 5 elements
-
         # Ensure coordinates are integers for OpenCV drawing
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
 
@@ -336,7 +326,7 @@ class App(tk.Tk):
 
         # Variables for paths with default values
         # !!! Set your desired default paths here !!!
-        self.yaml_path_var = tk.StringVar(value="configs/DE_NET.yaml") # Example default
+        self.yaml_path_var = tk.StringVar(value="configs/DRIFT_NET.yaml") # Example default
         self.video_folder_var = tk.StringVar(value="data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005") # Example default
         # !!! ---------------------------------- !!!
 

@@ -20,7 +20,7 @@ dataset:
   label_path: UAV-benchmark-MOTD_v1.0/GT
   is_clean: true
   shuffle: true
-  nums_worker: 16
+  nums_worker: 2
 save_output: true
 seed: 2025
 train:
