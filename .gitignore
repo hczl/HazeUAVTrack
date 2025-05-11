@@ -3,3 +3,6 @@ data/*
 
 # 但不要忽略 .gitkeep 文件
 !data/.gitkeep
+
+# 忽略 ckpt模型文件
+models/*/*/ckpt/
