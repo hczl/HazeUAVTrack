@@ -14,7 +14,7 @@ from utils.create import create_model
 from utils.metrics import compute_map, compute_f1, compute_mota
 from utils.transform import load_annotations, scale_ground_truth_boxes, scale_ignore_regions
 
-os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
+os.environ['TORCH_HOME'] = './.torch'
 
 def preprocess(image_pil):
     w, h = image_pil.size
@@ -124,47 +124,47 @@ with open(result_txt, 'w') as f_out, torch.no_grad():
 
         if out:
             out.write(frame_np)
-# with open(result_txt, 'w') as f_out:
-#     for idx, img_path in enumerate(tqdm(image_files, desc="使用标签生成视频")):
-#         try:
-#             img_pil = Image.open(img_path).convert('RGB')
-#         except Exception as e:
-#             print(f"无法读取图像 {img_path}: {e}")
-#             continue
-#
-#         input_tensor, orig_size, resized_size = preprocess(img_pil)
-#         frame_np = (input_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-#         frame_np = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
-#
-#         # 使用 ground truth 框作为“预测”
-#         boxes = gt_labels[idx]
-#         all_preds.append(boxes)
-#
-#         # ---- 画GT框（作为预测使用）----
-#         for box in boxes:
-#             x1, y1, x2, y2, obj_id = map(int, box)
-#             conf = 1.0  # 假定置信度为 1.0
-#             cv2.rectangle(frame_np, (x1, y1), (x2, y2), (0, 255, 0), 2)
-#             cv2.putText(frame_np, f"GT-{obj_id}", (x1, max(y1-10, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-#             f_out.write(f"{idx},{x1},{y1},{x2},{y2},{conf:.4f},{obj_id}\n")
-#
-#         # ---- 画忽略区域框（紫色）----
-#         if idx < len(ignore_masks):
-#             for ig_box in ignore_masks[idx]:
-#                 x1, y1, x2, y2 = map(int, ig_box)
-#                 cv2.rectangle(frame_np, (x1, y1), (x2, y2), (255, 0, 255), 2)
-#
-#         # ---- 视频写入 ----
-#         if out is None:
-#             h, w, _ = frame_np.shape
-#             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-#             out = cv2.VideoWriter(video_path, fourcc, output_fps, (w, h))
-#             if not out.isOpened():
-#                 print("无法初始化视频写入对象。")
-#                 out = None
-#
-#         if out:
-#             out.write(frame_np)
+with open(result_txt, 'w') as f_out:
+    for idx, img_path in enumerate(tqdm(image_files, desc="使用标签生成视频")):
+        try:
+            img_pil = Image.open(img_path).convert('RGB')
+        except Exception as e:
+            print(f"无法读取图像 {img_path}: {e}")
+            continue
+
+        input_tensor, orig_size, resized_size = preprocess(img_pil)
+        frame_np = (input_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        frame_np = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+
+        # 使用 ground truth 框作为“预测”
+        boxes = gt_labels[idx]
+        all_preds.append(boxes)
+
+        # ---- 画GT框（作为预测使用）----
+        for box in boxes:
+            x1, y1, x2, y2, obj_id = map(int, box)
+            conf = 1.0  # 假定置信度为 1.0
+            cv2.rectangle(frame_np, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame_np, f"GT-{obj_id}", (x1, max(y1-10, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            f_out.write(f"{idx},{x1},{y1},{x2},{y2},{conf:.4f},{obj_id}\n")
+
+        # ---- 画忽略区域框（紫色）----
+        if idx < len(ignore_masks):
+            for ig_box in ignore_masks[idx]:
+                x1, y1, x2, y2 = map(int, ig_box)
+                cv2.rectangle(frame_np, (x1, y1), (x2, y2), (255, 0, 255), 2)
+
+        # ---- 视频写入 ----
+        if out is None:
+            h, w, _ = frame_np.shape
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(video_path, fourcc, output_fps, (w, h))
+            if not out.isOpened():
+                print("无法初始化视频写入对象。")
+                out = None
+
+        if out:
+            out.write(frame_np)
 
 for frame_i, (preds, gts, ignores) in enumerate(zip(all_preds, gt_labels, ignore_masks)):
     print(f"Frame {frame_i}: {len(preds)} preds, {len(gts)} gts, {len(ignores)} ignores")
@@ -177,8 +177,6 @@ if out:
 end_time = time.time()
 fps = len(image_files) / all_time
 print(f"\n系统处理速度: {fps:.2f} FPS")
-
-
 
 # 评估指标（示例）
 map_score = compute_map(all_preds, gt_labels, ignore_masks=ignore_masks)

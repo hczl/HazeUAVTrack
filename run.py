@@ -71,12 +71,6 @@ if __name__ == "__main__":
 
     yaml = ['AD_NET']
     for i in yaml:
-        # 在每次 experiment 开始前也可以选择清空一次缓存，虽然在 experiment 结束后清空更重要
-        # if torch.cuda.is_available():
-        #     torch.cuda.empty_cache()
-        #     gc.collect()
-        #     print("Cleared cache before starting next experiment.")
-
         run_experiment(f"configs/{i}.yaml")
 
     print("\nAll experiments finished.")
@@ -84,4 +78,5 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gc.collect()
+        # 所有实验完成后，最后清空一次 CUDA 缓存。
         print("Final CUDA cache cleared after all experiments.")
