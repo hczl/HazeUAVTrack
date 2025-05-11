@@ -5,4 +5,5 @@ data/*
 !data/.gitkeep
 
 # 忽略 ckpt模型文件
-models/*/*/ckpt/
+models/*/*/ckpt
+
