@@ -38,26 +38,26 @@ def create_data(cfg):
 
     train_loader = DataLoader(train_dataset, batch_size=cfg['dataset']['batch'], sampler=train_shared_sampler,
                               collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
-                              pin_memory=True)
+                              pin_memory=False)
 
     val_loader = DataLoader(val_dataset, batch_size=cfg['dataset']['batch'], sampler=val_shared_sampler,
                             collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
-                            pin_memory=True)
+                            pin_memory=False)
 
     test_loader = DataLoader(test_dataset, batch_size=cfg['dataset']['batch'],
                              shuffle=cfg['dataset'].get('shuffle', True),
                              collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
-                             pin_memory=True)
+                             pin_memory=False)
 
     if cfg['dataset']['is_clean']:
         train_clean_loader = DataLoader(train_clean_dataset, batch_size=cfg['dataset']['batch'],
                                         sampler=train_shared_sampler,
                                         collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
-                                        pin_memory=True)
+                                        pin_memory=False)
 
         val_clean_loader = DataLoader(val_clean_dataset, batch_size=cfg['dataset']['batch'], sampler=val_shared_sampler,
                                       collate_fn=custom_collate_fn, num_workers=cfg['dataset'].get('num_workers', 4),
-                                      pin_memory=True)
+                                      pin_memory=False)
 
     else:
         train_clean_loader = None

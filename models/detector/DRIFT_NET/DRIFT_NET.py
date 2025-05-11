@@ -29,7 +29,7 @@ def compute_iou(boxes1, boxes2):
         return torch.empty((boxes1.shape[0], boxes2.shape[0]), device=boxes1.device, dtype=torch.float32)
     return box_iou(boxes1, boxes2)
 
-def focal_loss(inputs, targets, alpha=0.25, gamma=2.0, reduction='sum'):
+def focal_loss(inputs, targets, alpha=0.5, gamma=1.0, reduction='sum'):
     """
     Args:
         inputs (Tensor): A float tensor of arbitrary shape. The predictions (probabilities).
@@ -164,11 +164,6 @@ class ResNet50LiteFPNBackbone(nn.Module):
         super().__init__()
         resnet = resnet50(pretrained=pretrained)
 
-        # Define layers corresponding to C2, C3, C4, C5 outputs
-        # C2: After layer1 (stride 4)
-        # C3: After layer2 (stride 8)
-        # C4: After layer3 (stride 16)
-        # C5: After layer4 (stride 32)
         self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,
                                     resnet.maxpool, resnet.layer1)  # Output stride 4, channels 256
         self.layer2 = resnet.layer2  # Output stride 8, channels 512
@@ -423,11 +418,11 @@ class DRIFT_NET(nn.Module):
         super().__init__()
         self.cfg = cfg
         # IoU threshold for marking predictions as 'ignore'
-        self.ignore_iou_threshold = 0.5 # Common value, adjust as needed
+        self.ignore_iou_threshold = 0.3 # Common value, adjust as needed
 
         # Flag to potentially use MSE loss for confidence instead of Focal Loss
-        # self._use_mse = False # Keep as False for standard detection training
-
+        self._use_mse = False # Keep as False for standard detection training
+        self._evaluating = False
         # Load model-specific config
         model_cfg_dict = {}
         try:
@@ -678,7 +673,8 @@ class DRIFT_NET(nn.Module):
             # Select raw bbox predictions and targets for positive samples
             matched_pred_raw_bbox = raw_preds_flat[positive_mask][:, :4]
             matched_bbox_target_raw = bbox_target_raw[positive_mask]
-
+            # print('matched_pred_raw_bbox',matched_pred_raw_bbox)
+            # print('matched_bbox_target_raw',matched_bbox_target_raw)
             # Calculate Smooth L1 loss between raw bbox predictions and raw targets
             bbox_loss = F.smooth_l1_loss(matched_pred_raw_bbox, matched_bbox_target_raw, reduction='sum') # Sum over matched samples
 
@@ -857,53 +853,82 @@ class DRIFT_NET(nn.Module):
 
 
     def forward_loss(self, dehaze_imgs, targets, ignore_list=None):
-        """
-        Forward pass specifically for training, including loss calculation.
 
-        Args:
-            dehaze_imgs (Tensor): Input batch of images [B, C, H, W].
-            targets (list): List of list of GT annotations for the full batch.
-                           Each inner list is for one image.
-            ignore_list (list, optional): List of list of ignore annotations. Defaults to None.
-
-        Returns:
-            dict: Dictionary containing the total loss and logging metrics.
-        """
         B, _, H_img, W_img = dehaze_imgs.shape
-        # Ensure batch size is a multiple of self.step for training
-        # Truncate batch if needed
-        if B % self.step != 0:
-             print(f"Warning: Batch size {B} not divisible by step {self.step}. Truncating batch to {B - (B % self.step)}.")
-             dehaze_imgs = dehaze_imgs[:B - (B % self.step)]
-             targets = targets[:B - (B % self.step)]
-             if ignore_list is not None:
-                 ignore_list = ignore_list[:B - (B % self.step)]
-             B, _, H_img, W_img = dehaze_imgs.shape # Update B
 
-        # During training, the detection head only outputs predictions for the final frame
-        # of each sequence of length 'step'.
-        # So, the targets and ignore_list should also only contain annotations
-        # for these final frames.
-        # The indices of the final frames are step-1, 2*step-1, 3*step-1, ...
-        final_frame_indices = torch.arange(self.step - 1, B, self.step).tolist()
+        # --- Determine mode based on custom flag ---
+        if not self._evaluating: # If not evaluating, assume training mode
 
-        # Select targets and ignore_list only for the final frames
-        targets_final_frames = [targets[i] for i in final_frame_indices]
-        ignore_list_final_frames = [ignore_list[i] for i in final_frame_indices] if ignore_list is not None else None
+            # Ensure batch size is a multiple of self.step for training
+            # Truncate batch if needed
+            if B % self.step != 0:
+                 print(f"Warning: Batch size {B} not divisible by step {self.step} in training mode. Truncating batch to {B - (B % self.step)}.")
+                 dehaze_imgs = dehaze_imgs[:B - (B % self.step)]
+                 targets = targets[:B - (B % self.step)]
+                 if ignore_list is not None:
+                     ignore_list = ignore_list[:B - (B % self.step)]
+                 B, _, H_img, W_img = dehaze_imgs.shape # Update B after truncation
 
-        # Perform the forward pass in training mode.
-        # This will process sequences and output predictions for the last frame of each sequence.
-        # raw_preds_list, activated_preds_list will have batch size B // step.
-        raw_preds_list, activated_preds_list = self(dehaze_imgs, training=True)
-        # Compute the loss using the predictions and the corresponding targets/ignores
+            final_frame_indices = torch.arange(self.step - 1, B, self.step).tolist()
+            targets_for_loss = [targets[i] for i in final_frame_indices]
+            ignore_list_for_loss = [ignore_list[i] for i in final_frame_indices] if ignore_list is not None else None
+
+            # Perform the forward pass in training mode.
+            # Explicitly pass training=True to the forward method.
+            raw_preds_list, activated_preds_list = self(dehaze_imgs, training=True)
+
+
+        else:
+            raw_preds_list = []
+
+            activated_preds_list = []
+
+            targets_for_loss = []
+
+            ignore_list_for_loss = []
+
+
+            for i in range(B):
+
+                single_img = dehaze_imgs[i].unsqueeze(0)
+
+                single_targets = targets[i]
+
+                single_ignore = ignore_list[i] if ignore_list is not None else None
+
+                raw_preds_single_list, activated_preds_single_list = self(single_img,
+                                                                          training=False)
+
+                if i == 0:
+
+                    raw_preds_list = [[] for _ in range(len(raw_preds_single_list))]
+
+                    activated_preds_list = [[] for _ in range(len(activated_preds_single_list))]
+
+                for level_idx in range(len(raw_preds_single_list)):
+                    raw_preds_list[level_idx].append(raw_preds_single_list[level_idx])
+
+                    activated_preds_list[level_idx].append(
+                        activated_preds_single_list[level_idx])
+
+                targets_for_loss.append(single_targets)
+
+                ignore_list_for_loss.append(single_ignore)
+
+            raw_preds_list = [torch.cat(preds_level_list, dim=0) for preds_level_list in
+                              raw_preds_list]
+
+            activated_preds_list = [torch.cat(preds_level_list, dim=0) for preds_level_list in
+                                    activated_preds_list]
+
         loss_dict = self.compute_batch_loss(
             raw_preds_list,
             activated_preds_list,
-            targets_final_frames, # Use targets only for the final frames
-            ignore_list_final_frames, # Use ignores only for the final frames
-            (H_img, W_img)
+            targets_for_loss,
+            ignore_list_for_loss,
+            (H_img, W_img),
         )
-
+        self.reset_memory()
         return loss_dict
 
 
@@ -986,17 +1011,11 @@ class DRIFT_NET(nn.Module):
 
             batch_results.append(filtered_preds)
 
-        # Note: The original code returned results[0]. If B > 1 and sequences are independent,
-        # this function needs to be called per image, or the batch processing logic
-        # in inference needs to be adjusted. For typical video inference (B=1), this is fine.
-        # If B > 1 represents consecutive frames, this might be okay, but the GRU state
-        # would be shared across the batch dimension, which is less standard.
-        # Let's return the list of results for the batch for flexibility.
-        # If B=1, the list will have one element.
-        return batch_results # Return list of [Num_after_NMS, 5] tensors, one tensor per image in batch
+        # print(batch_results[0])
+        return batch_results[0] # Return list of [Num_after_NMS, 5] tensors, one tensor per image in batch
 
     def reset_memory(self):
         """Resets the internal ConvGRU hidden state for inference."""
-        print("Resetting DRIFT_NET memory state.")
+        # print("Resetting DRIFT_NET memory state.")
         self._hist_f = [None] * 4 # Reset history for 4 FPN levels
 

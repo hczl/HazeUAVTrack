@@ -136,8 +136,6 @@ class HazeUAVTrack(nn.Module):
         for epoch in range(0, num_epochs):
             if hasattr(self.detector, '_use_mse'):
                 self.detector._use_mse = (epoch < 4)  # 训练前四轮使用 MSE
-            if hasattr(self.detector, 'iou'):
-                self.detector._use_mse = 0.5 if(epoch > 2) else 0.3
             # pretrain
             if not self.freeze_dehaze and epoch > self.cfg['train']['dehaze_epoch'] and self.pretrain_flag:
                 self.detector_flag = True
@@ -177,6 +175,8 @@ class HazeUAVTrack(nn.Module):
     @torch.no_grad()
     def evaluate(self, val_loader, val_clean_loader):
         self.eval()
+        if hasattr(self.detector, '_evaluating'):
+            self.detector._evaluating = True
         epoch_losses = {}
         if val_clean_loader is not None:
             loader = zip(val_loader, val_clean_loader)
@@ -218,7 +218,8 @@ class HazeUAVTrack(nn.Module):
                         postfix[k] = f'ERR({e})'
                 postfix['Batch'] = f'{batch_idx + 1}/{self.train_batch_nums}'
                 pbar.set_postfix(postfix)
-
+        if hasattr(self.detector, '_evaluating'):
+            self.detector._evaluating = False
         # 打印每个 loss 项的平均值
         print(f"验证完成，平均 Loss: {epoch_losses['total_loss']/ self.val_batch_nums:.4f}")
         for key, total in epoch_losses.items():
