@@ -1,9 +1,17 @@
-# 忽略 data 目录下的所有内容
 data/*
 
-# 但不要忽略 .gitkeep 文件
 !data/.gitkeep
 
-# 忽略 ckpt模型文件
 *.pth
 
+*.pt
+!/models/detector/YOLOV3/ckpt/
+!/models/detector/DRIFT_NET/ckpt/
+!/models/detector/DE_NET/ckpt/
+!/models/dehaze/AD_NET/ckpt/
+!/models/dehaze/AOD_NET/ckpt/
+!/models/dehaze/DIP/ckpt/
+!/models/dehaze/FALCON/ckpt/
+!/models/dehaze/NONE/ckpt/
+!/models/detector/YOLOV3/yolov3u.pt
+!/output/
