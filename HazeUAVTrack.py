@@ -1,5 +1,8 @@
 import os
+import sys
+import traceback
 
+import cv2
 import numpy as np
 import torch
 from torch import nn
@@ -33,7 +36,7 @@ class HazeUAVTrack(nn.Module):
         self.iou_thresh = self.cfg['iou_threshold'] # 检测 NMS 的 IoU 阈值
 
         # 动态加载并实例化去雾模型
-        self.dehaze = call_function(cfg['method']['dehaze'],
+        self.dehaze  = call_function(cfg['method']['dehaze'],
                                     f"models.dehaze.{cfg['method']['dehaze']}")
 
         # 动态加载并实例化检测模型，并将完整配置 cfg 传递给检测器
@@ -62,6 +65,7 @@ class HazeUAVTrack(nn.Module):
         else:
             targets_img = None
 
+
         # 清零梯度
         self.optimizer.zero_grad()
         # 开启异常检测 (可选，用于调试)
@@ -73,6 +77,9 @@ class HazeUAVTrack(nn.Module):
             # 训练检测器：先去雾，再计算检测损失
             dehaze_imgs = self.dehaze(low_res_images)
             loss_dict = self.detector.forward_loss(dehaze_imgs, targets, ignore_list)
+            # print(loss_dict['total_loss'].requires_grad)
+            # print(loss_dict['total_loss'].grad_fn)
+
             loss_dict['total_loss'].backward() # 对总损失进行反向传播
         else:
             # 训练去雾器：计算去雾损失

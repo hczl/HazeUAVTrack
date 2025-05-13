@@ -29,7 +29,22 @@ class tracker(nn.Module):
 
         # image_tensor: [1, 3, H, W] -> [H, W, 3] (BoxMOT 接收 numpy 图像)
         img_np = image_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
-        tracks = self.tracker.update(detections, img_np)
+        detections_for_tracker = []
+        for detection in detections:
+            if len(detection) == 5:
+                # 如果只有 5 个元素，补充一个默认的类信息
+                detection_with_class = np.append(detection, 1)
+            elif len(detection) == 6:
+                # 如果已经有 6 个元素，则不做任何修改
+                detection_with_class = detection
+            else:
+                # 如果检测数据不符合预期，可以选择打印警告或跳过
+                print(f"Warning: Invalid detection format {detection}")
+                continue
+
+            detections_for_tracker.append(detection_with_class)
+        detections_for_tracker = np.array(detections_for_tracker)
+        tracks = self.tracker.update(detections_for_tracker, img_np)
 
 
         return tracks

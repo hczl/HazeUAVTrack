@@ -28,7 +28,7 @@ train:
   log_interval: 10
   debug: false
   epochs: 20
-  resume_training: true
+  resume_training: false
   lr: 0.0001
   freeze_dehaze: false
   pretrain_flag: false

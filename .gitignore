@@ -5,13 +5,14 @@ data/*
 *.pth
 
 *.pt
-!/models/detector/YOLOV3/ckpt/
-!/models/detector/DRIFT_NET/ckpt/
-!/models/detector/DE_NET/ckpt/
-!/models/dehaze/AD_NET/ckpt/
-!/models/dehaze/AOD_NET/ckpt/
-!/models/dehaze/DIP/ckpt/
-!/models/dehaze/FALCON/ckpt/
-!/models/dehaze/NONE/ckpt/
-!/models/detector/YOLOV3/yolov3u.pt
-!/output/
+/models/detector/YOLOV3/ckpt/
+/models/detector/DRIFT_NET/ckpt/
+/models/detector/DE_NET/ckpt/
+/models/dehaze/AD_NET/ckpt/
+/models/dehaze/AOD_NET/ckpt/
+/models/dehaze/DIP/ckpt/
+/models/dehaze/FALCON/ckpt/
+/models/dehaze/NONE/ckpt/
+/models/detector/YOLOV3/yolov3u.pt
+/output/
+/models/detector/IA_YOLOV3/ckpt/

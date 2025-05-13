@@ -6,12 +6,17 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms
 import torchvision.transforms.functional as F
+# Assumed to be available
 from utils.config import load_config
 from utils.create import create_model
+# Assumed HazeUAVTrack class is defined elsewhere and importable
+# from HazeUAVTrack import HazeUAVTrack
+
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import matplotlib.pyplot as plt
 import cv2
+import traceback # 导入 traceback 用于打印详细错误
 
 # 设置 Matplotlib 支持中文显示和负号正常显示
 plt.rcParams['font.family'] = 'SimHei' # 设置字体为黑体 (或其他支持中文的字体)
@@ -21,9 +26,9 @@ plt.rcParams['axes.unicode_minus'] = False # 解决负号显示问题
 os.environ['TORCH_HOME'] = './.torch'
 
 # 定义输入、GT 和输出文件夹路径
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M/M1005' # 包含雾图的文件夹
+image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005' # 包含雾图的文件夹
 gt_folder = 'data/UAV-M/UAV-benchmark-M/M1005' # 包含对应清晰图的文件夹
-max_size = 640 # 模型输入图像的最大边长
+max_size = 1024 # 模型输入图像的最大边长
 result_dir = 'result/dehaze' # 结果保存目录 (图表等)
 video_dir = 'result/video' # 生成视频保存目录
 
@@ -32,11 +37,21 @@ os.makedirs(result_dir, exist_ok=True)
 os.makedirs(video_dir, exist_ok=True)
 
 # 定义图像预处理变换：转换为 PyTorch Tensor
-transform = transforms.ToTensor()
+# transforms.ToTensor() 将 PIL Image (HWC, uint8, [0, 255]) 转换为 Tensor (CHW, float, [0.0, 1.0])
+transform_to_tensor = transforms.ToTensor()
+
+
+# Define the mean and std used during training normalization
+# These should match the values used in your create_data function
+# Make them Tensors with shape [1, C, 1, 1] for easy broadcasting with [1, C, H, W] output
+# Assuming RGB channels (3)
+NORM_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+NORM_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
 
 # 定义要评估的去雾方法列表
 # 这些名称应与您的模型配置中的 'method']['dehaze'] 字段对应
-dehazes = ['DIP', 'AD_NET', 'AOD_NET']
+dehazes = ['DIP', 'FALCON', 'AOD_NET', 'FFA']
 
 # 定义模型配置文件的路径
 # 假设所有方法使用同一个基础配置，只修改 'method']['dehaze']
@@ -60,14 +75,27 @@ for dehaze in dehazes:
     cfg = load_config(yaml_path)
     # 修改配置，指定当前要使用的去雾方法
     cfg['method']['dehaze'] = dehaze
-    # 创建模型实例 (假设 create_model 能根据 cfg['method']['dehaze'] 创建对应模型)
+
+    # --- Create and load model ---
+    # Assuming create_model function is available and returns an instance of HazeUAVTrack or similar
+    # Assuming model has .to(device), .eval(), .load_model(), and .predict() methods
     model = create_model(cfg)
-    # 加载模型权重 (假设 load_model 方法能根据 cfg 中的信息加载正确的权重)
-    model.load_model()
-    # 设置设备
+
+    # Set device
     device = cfg['device'] if torch.cuda.is_available() else "cpu"
-    model.to(device) # 将模型发送到设备
-    model.eval() # 设置模型为评估模式 (关闭 dropout 等)
+    model.to(device) # Move model to device
+
+    # Load model weights
+    try:
+        # Assuming model.load_model() loads the state_dict correctly for inference
+        model.load_model() # Ensure this method correctly loads weights for inference
+    except Exception as e:
+        print(f"警告: 加载模型权重失败 for {dehaze}: {e}")
+        print("将使用未加载权重的模型。请检查 load_model 方法。")
+        traceback.print_exc() # 打印详细错误信息
+
+    # Set model to evaluation mode (disables dropout, batchnorm tracking stats etc.)
+    model.eval()
 
     # 用于记录当前方法的指标和处理后的帧
     frame_times = [] # 每帧处理时间
@@ -84,15 +112,15 @@ for dehaze in dehazes:
 
             # 尝试打开图片
             try:
-                image = Image.open(image_path).convert("RGB") # 打开雾图并转为 RGB
-                gt_image = Image.open(gt_path).convert("RGB") # 打开清晰图并转为 RGB
+                image_pil = Image.open(image_path).convert("RGB") # 打开雾图并转为 RGB
+                gt_image_pil = Image.open(gt_path).convert("RGB") # 打开清晰图并转为 RGB
             except Exception as e:
                 print(f"跳过文件: {file_name} ({e})") # 如果打开失败，打印错误并跳过
                 continue
 
-            # 将 PIL 图像转换为 PyTorch Tensor (值在 [0, 1])
-            image_tensor = transform(image)
-            gt_tensor = transform(gt_image)
+            # 将 PIL 图像转换为 PyTorch Tensor (值在 [0, 1]，RGB, [C, H, W])
+            image_tensor = transform_to_tensor(image_pil)
+            gt_tensor = transform_to_tensor(gt_image_pil) # GT 也需要 Tensor 形式用于 resize 和 PSNR/SSIM 计算
 
             # 获取原始尺寸
             orig_h, orig_w = image_tensor.shape[1], image_tensor.shape[2]
@@ -103,77 +131,132 @@ for dehaze in dehazes:
             new_w = max(32, int(math.floor(orig_w * r / 32) * 32))
             # 调整雾图和清晰图到模型输入尺寸
             image_resized = F.resize(image_tensor, (new_h, new_w))
-            gt_resized = F.resize(gt_tensor, (new_h, new_w))
+            gt_resized = F.resize(gt_tensor, (new_h, new_w)) # GT 也需要 resize 到相同尺寸进行对比
 
             # 添加批次维度并发送到设备
-            input_tensor = image_resized.unsqueeze(0).to(device)
+            # Apply normalization using the same mean/std as training
+            # Assuming your model expects normalized input like in training
+            normalized_input_tensor = F.normalize(image_resized, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            input_tensor = normalized_input_tensor.unsqueeze(0).to(device)
+
 
             # 记录处理开始时间
             start_time = time.time()
-            # 使用模型进行预测 (去雾)。假设 model.predict 返回去雾后的图像 Tensor [1, C, H', W']。
-            # 注意：如果您的模型结构不同 (例如只输出检测框)，需要调整这里获取去雾图像的方式。
-            # 如果模型没有单独的去雾输出，您可能需要修改模型代码或跳过 PSNR/SSIM 计算。
-            # 为了与后面的 PSNR/SSIM 计算兼容，假设 model.predict 返回去雾后的图像。
-            output = model.predict(input_tensor)
+            # Use the model to predict (dehaze). Assume model.predict returns a dehazed image Tensor [1, C, H', W'].
+            # This output Tensor is expected to be in the standardized space.
+            output = model.predict(input_tensor) # Assume output is a Tensor [1, C, H', W'] (STANDARDIZED)
 
-            torch.cuda.synchronize() # 等待 CUDA 操作完成，确保计时准确
-            elapsed = time.time() - start_time # 计算处理时间
-            frame_times.append(elapsed) # 记录每帧处理时间
+            # Ensure output is a tensor before processing
+            if not isinstance(output, torch.Tensor):
+                 print(f"警告: 模型预测输出不是 Tensor for {file_name}. Skipping.")
+                 continue # Skip this file if output is not a Tensor
 
-            # 移除批次维度，移到 CPU，clamp 值到 [0, 1]
-            output_image = output.squeeze(0).cpu().clamp(0, 1)
+            torch.cuda.synchronize() # Wait for CUDA operations to complete for accurate timing
+            elapsed = time.time() - start_time # Calculate processing time
+            frame_times.append(elapsed) # Record processing time per frame
 
-            # 计算 PSNR 和 SSIM
-            # 需要将 Tensor 转换为 NumPy 数组，并调整维度顺序为 (H, W, C)
-            # PSNR 和 SSIM 函数期望输入是 NumPy 数组
-            psnr_val = psnr(gt_resized.permute(1, 2, 0).numpy(), output_image.permute(1, 2, 0).numpy(), data_range=1)
-            ssim_val = ssim(gt_resized.permute(1, 2, 0).numpy(), output_image.permute(1, 2, 0).numpy(), channel_axis=2, data_range=1)
+            # --- Process model output for metrics and visualization ---
 
-            psnr_list.append(psnr_val) # 记录 PSNR
-            ssim_list.append(ssim_val) # 记录 SSIM
+            # Assuming model output is a standardized Tensor [1, C, H, W]
+            # Needs denormalization and clamping to [0, 1] range
+            # Move NORM_MEAN and NORM_STD to the same device as output
+            output_denorm = output * NORM_STD.to(output.device) + NORM_MEAN.to(output.device)
 
-            # 将处理后的图像转换为 NumPy 数组 (uint8 格式，值在 0-255) 用于保存和视频生成
-            processed_np = (output_image.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-            processed_frames.append(processed_np) # 存储处理后的帧
+            # Clamp values to [0, 1] after denormalization
+            output_clamped = torch.clamp(output_denorm, 0, 1)
 
-    # 如果有处理帧 (即 image_files 不为空且没有跳过所有文件)
-    if frame_times:
-        # 计算平均 FPS, PSNR, SSIM
+            # Remove batch dimension and move to CPU for PSNR/SSIM and saving
+            output_image_cpu = output_clamped.squeeze(0).cpu() # Shape [C, H, W] (float, [0, 1])
+
+
+            # Calculate PSNR and SSIM
+            # Needs conversion to NumPy array with dimension order (H, W, C)
+            # PSNR and SSIM functions expect NumPy arrays with values in [0, 1] or [0, 255]
+            # GT image gt_resized is Tensor [C, H, W], float, [0, 1]
+            # Processed image output_image_cpu is Tensor [C, H, W], float, [0, 1] (after denorm and clamp)
+            try:
+                # Convert to NumPy (H, W, C)
+                gt_np = gt_resized.permute(1, 2, 0).numpy()
+                output_np_float = output_image_cpu.permute(1, 2, 0).numpy()
+
+                psnr_val = psnr(gt_np, output_np_float, data_range=1)
+                # SSIM needs channel_axis parameter
+                ssim_val = ssim(gt_np, output_np_float, channel_axis=2, data_range=1)
+
+                psnr_list.append(psnr_val) # Record PSNR
+                ssim_list.append(ssim_val) # Record SSIM
+            except Exception as e:
+                 print(f"警告: 计算 PSNR/SSIM 失败 for {file_name}: {e}")
+                 traceback.print_exc()
+                 psnr_list.append(np.nan) # Record NaN indicating calculation failure
+                 ssim_list.append(np.nan) # Record NaN indicating calculation failure
+
+
+            # Convert processed image to NumPy array (uint8 format, values in 0-255) for saving and video generation
+            # output_image_cpu is [C, H, W], float, [0, 1]
+            # Permute to [H, W, C], multiply by 255, convert to uint8
+            processed_np = (output_image_cpu.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            processed_frames.append(processed_np) # Store processed frame
+
+    # If any frames were processed (i.e., image_files was not empty and no files were skipped)
+    # Filter out NaN values from PSNR/SSIM lists before calculating mean
+    valid_psnr = [x for x in psnr_list if not math.isnan(x)]
+    valid_ssim = [x for x in ssim_list if not math.isnan(x)]
+
+    if frame_times: # Check if any frames were processed successfully for timing
+        # Calculate average FPS
         fps = len(frame_times) / sum(frame_times)
-        avg_psnr = np.mean(psnr_list)
-        avg_ssim = np.mean(ssim_list)
 
-        # 存储结果
+        # Calculate average PSNR, SSIM (only for valid values)
+        avg_psnr = np.mean(valid_psnr) if valid_psnr else 0 # Avoid calculating mean of empty list
+        avg_ssim = np.mean(valid_ssim) if valid_ssim else 0 # Avoid calculating mean of empty list
+
+
+        # Store results
         fps_results[dehaze] = fps
         psnr_results[dehaze] = avg_psnr
         ssim_results[dehaze] = avg_ssim
 
-        # 打印当前方法的评估结果
+        # Print current method's evaluation results
         print(f"{dehaze} - FPS: {fps:.2f}, PSNR: {avg_psnr:.2f}, SSIM: {avg_ssim:.3f}")
 
-        # 如果有处理后的帧，生成视频
+        # If there are processed frames, generate video
         if processed_frames:
             print(f"正在生成视频: {dehaze}.mp4")
-            video_path = os.path.join(video_dir, f'{dehaze}.mp4') # 视频保存路径
-            height, width, _ = processed_frames[0].shape # 获取帧尺寸
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v') # 定义视频编码器
-            # 创建视频写入对象 (文件名, 编码器, 帧率, 尺寸)
-            out = cv2.VideoWriter(video_path, fourcc, 30, (width, height))
+            video_path = os.path.join(video_dir, f'{dehaze}.mp4') # Video save path
+            height, width, _ = processed_frames[0].shape # Get frame dimensions
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Define video codec (for mp4)
+            # Ensure video dimensions are even, otherwise VideoWriter might fail
+            width = width if width % 2 == 0 else width - (width % 2)
+            height = height if height % 2 == 0 else height - (height % 2)
 
-            # 将处理后的帧写入视频文件
-            for frame in processed_frames:
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) # 将 RGB 转换为 BGR (OpenCV 视频写入期望 BGR)
-                out.write(frame_bgr) # 写入帧
+            try:
+                 out = cv2.VideoWriter(video_path, fourcc, 30, (width, height))
 
-            out.release() # 释放视频写入对象
-            print(f"视频已保存到: {video_path}")
+                 # Write processed frames to video file
+                 for frame in processed_frames:
+                     # Resize frame to the final video size if necessary (due to potential odd dimensions from original resize)
+                     if frame.shape[0] != height or frame.shape[1] != width:
+                          frame = cv2.resize(frame, (width, height))
+
+                     # Processed frames are currently RGB uint8 [0, 255] HWC
+                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) # Convert RGB to BGR (OpenCV video writer expects BGR)
+                     out.write(frame_bgr) # Write frame
+
+                 out.release() # Release video writer object
+                 print(f"视频已保存到: {video_path}")
+            except Exception as e:
+                 print(f"错误: 生成视频 {video_path} 失败: {e}")
+                 traceback.print_exc()
+
 
     else:
-        # 如果没有任何帧被处理
+        # If no frames were processed
         fps_results[dehaze] = 0
         psnr_results[dehaze] = 0
         ssim_results[dehaze] = 0
         print(f"{dehaze} 未处理图像。")
+
 
 def plot_metric(result_dict, title, ylabel, filename):
     """
@@ -185,25 +268,32 @@ def plot_metric(result_dict, title, ylabel, filename):
         ylabel (str): Y 轴标签。
         filename (str): 保存图表的文件名 (将保存在 result_dir 中)。
     """
-    # 按值降序排序结果
+    # Sort results by value in descending order
     items = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
-    names, values = zip(*items) # 分离方法名和值
-    plt.figure(figsize=(8, 6)) # 创建图表
-    bars = plt.bar(names, values) # 绘制柱状图
-    plt.title(title) # 设置标题
-    plt.ylabel(ylabel) # 设置 Y 轴标签
-    # 设置 Y 轴范围，略大于最大值
-    plt.ylim(0, max(values) * 1.2 if values else 1) # 如果 values 为空，设置 ylim 为 (0, 1)
-    # 在每个柱状图上方添加数值标签
+    names, values = zip(*items) # Separate method names and values
+
+    plt.figure(figsize=(8, 6)) # Create figure
+    bars = plt.bar(names, values) # Plot bar chart
+    plt.title(title) # Set title
+    plt.ylabel(ylabel) # Set Y-axis label
+
+    # Set Y-axis limits slightly above max value
+    # Ensure it works even if values list is empty or contains only NaN
+    max_val = max(values) if values and not all(math.isnan(v) for v in values) else 0.1 # Ensure a minimum range
+    plt.ylim(0, max_val * 1.2)
+
+    # Add value labels on top of each bar
     for bar in bars:
         h = bar.get_height()
-        # 格式化标签，保留两位小数
-        plt.text(bar.get_x() + bar.get_width()/2, h + 0.02 * max(values) if values else h + 0.02, f"{h:.2f}", ha='center') # 调整文本位置
-    plt.tight_layout() # 调整布局，避免标签重叠
-    plt.savefig(os.path.join(result_dir, filename)) # 保存图表到文件
-    plt.close() # 关闭图表
+        # Format label to 2 decimal places
+        plt.text(bar.get_x() + bar.get_width()/2, h + max_val * 0.02, f"{h:.2f}", ha='center') # Adjust text position
+    plt.tight_layout() # Adjust layout to prevent labels overlapping
+    plt.savefig(os.path.join(result_dir, filename)) # Save plot to file
+    plt.close() # Close plot
 
-# 绘制并保存各指标的图表
+# Plot and save charts for each metric
 plot_metric(fps_results, "各去雾方法的平均 FPS", "FPS", "fps.png")
-plot_metric(psnr_results, "各去雾方法的平均 PSNR", "PSNR", "psnr.png")
+plot_metric(psnr_results, "各去雾方法的平均 PSNR", "PSNR", "psnr.png") # Corrected filename
 plot_metric(ssim_results, "各去雾方法的平均 SSIM", "SSIM", "ssim.png")
+
+print("\n评估完成。图表已保存。")

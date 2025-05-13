@@ -69,7 +69,7 @@ if __name__ == "__main__":
          print(f"CUDA is available. Using {torch.cuda.get_device_name(0)}")
 
 
-    yaml = ['AD_NET']
+    yaml = ['DIP']
     for i in yaml:
         run_experiment(f"configs/{i}.yaml")
 

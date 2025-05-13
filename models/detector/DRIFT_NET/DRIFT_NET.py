@@ -375,7 +375,7 @@ class DetectionHead(nn.Module):
 
         # 初始化置信度预测层的偏置，以实现稳定的训练起始
         # 这鼓励模型在开始时预测较低的置信度
-        pi = 0.01 # 初始正样本概率
+        pi = 0.1 # 初始正样本概率
         bias_value = -torch.log(torch.tensor((1 - pi) / pi)) # 计算对应 logits
 
         # 只对输出层中置信度部分的偏置应用初始化
@@ -689,18 +689,36 @@ class DRIFT_NET(nn.Module):
         # 置信度损失: 计算所有非忽略样本的损失
         conf_loss = torch.tensor(0.0, device=device) # 初始化 conf 损失为 0
         if num_non_ignored > 0:
-            # 选择非忽略样本的原始置信度 logits 和目标值
-            pred_raw_conf_non_ignored = raw_preds_flat[non_ignored_mask][:, 4] # 获取 logits
-            conf_target_non_ignored = conf_target[non_ignored_mask] # 获取目标 (0 或 1)
-
-            # 应用 sigmoid 获取概率值用于 Focal Loss
+            pred_raw_conf_non_ignored = raw_preds_flat[non_ignored_mask][:, 4]
+            conf_target_non_ignored = conf_target[non_ignored_mask]
             pred_conf_activated_non_ignored = torch.sigmoid(pred_raw_conf_non_ignored)
 
-            if getattr(self, "_use_mse", False):
-                conf_loss = F.mse_loss(pred_conf_activated_non_ignored, conf_target_non_ignored, reduction='sum') # 在非忽略样本上求和
-            else:
-                conf_loss = focal_loss(pred_conf_activated_non_ignored, conf_target_non_ignored, alpha=0.25, gamma=2.0, reduction='sum') # 在非忽略样本上求和
+            # === 1. 区分正负样本 ===
+            is_pos = conf_target_non_ignored == 1
+            is_neg = conf_target_non_ignored == 0
 
+            pos_conf = pred_conf_activated_non_ignored[is_pos]
+            neg_conf = pred_conf_activated_non_ignored[is_neg]
+
+            # === 2. Top-k 选择负样本 ===
+            K = min(neg_conf.numel(), 3 * is_pos.sum().item())  # 比例可调：负样本数量 = 正样本数量 × 3
+            if K > 0:
+                topk_neg_conf, topk_indices = torch.topk(neg_conf, K, largest=True)
+                topk_neg_mask = torch.zeros_like(neg_conf, dtype=torch.bool)
+                topk_neg_mask[topk_indices] = True
+                neg_conf = neg_conf[topk_neg_mask]
+                neg_target = torch.zeros_like(neg_conf)
+            else:
+                neg_conf = torch.tensor([], device=device)
+                neg_target = torch.tensor([], device=device)
+
+            # === 3. 拼接正负样本 ===
+            final_conf = torch.cat([pos_conf, neg_conf], dim=0)
+            final_target = torch.cat([torch.ones_like(pos_conf), neg_target], dim=0)
+
+            # === 4. 计算 Loss ===
+            if final_conf.numel() > 0:
+                conf_loss = focal_loss(final_conf, final_target, alpha=0.25, gamma=2.0, reduction='sum')
 
         return {
             'conf_loss': conf_loss, # 非忽略样本的置信度损失总和
@@ -941,6 +959,10 @@ class DRIFT_NET(nn.Module):
             ignore_list_for_loss,
             (H_img, W_img),
         )
+        if not loss_dict['total_loss'].requires_grad and not self._evaluating:
+            print("[Warning] No matched targets or valid predictions — using dummy loss to retain graph.")
+            loss_dict['total_loss'] = torch.zeros(1, requires_grad=True, device=raw_preds_list[0].device).sum()
+
         # 在 forward_loss 结束时重置内存，以确保下一批数据（可能是新的序列）有干净的状态
         self.reset_memory()
         return loss_dict
@@ -1027,7 +1049,7 @@ class DRIFT_NET(nn.Module):
         # 根据原代码结构，可能是假设 B=1 或只关心批次中的第一张图片。
         # 修正为返回整个列表以支持 B>1 的情况，但需要注意的是，如果 B>1 且是连续帧，
         # 历史状态 _hist_f 是共享的，这与独立帧处理不同。
-        return batch_results # 返回列表，每个元素是 [Num_after_NMS, 5] 张量，对应批次中的一张图片
+        return batch_results[0] # 返回列表，每个元素是 [Num_after_NMS, 5] 张量，对应批次中的一张图片
 
 
     def reset_memory(self):
