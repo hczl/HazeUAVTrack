@@ -67,7 +67,6 @@ def custom_collate_fn(batch):
         return images, labels
 
 
-# UAVOriginalDataset 需要修改以接收 is_mask 参数和读取忽略文件 (现在格式与标签文件相同)
 class UAVOriginalDataset(Dataset):
     """
     Dataset class for loading UAV image frames (original or pre-masked) and annotations.

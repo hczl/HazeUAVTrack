@@ -37,7 +37,7 @@ print(f"使用设备: {device}")
 # ---- 图像处理和检测函数 ----
 transform = transforms.Compose([transforms.ToTensor()])
 
-def preprocess_image(image_pil, max_size=640):
+def preprocess_image(image_pil, max_size=1024):
     """Preprocesses PIL image: to tensor, resize, add batch dim, move to device."""
     orig_w, orig_h = image_pil.size
     image_tensor = transform(image_pil)

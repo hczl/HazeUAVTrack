@@ -326,12 +326,10 @@ class AD_NET(nn.Module):
         tv = total_variation_loss(dehaze_img)
 
         # 根据需要调整损失权重
-        # 示例权重：L1 是主要的，Perceptual 帮助改善视觉质量，TV 使输出平滑
         loss_dict = {
             'l1_loss': l1,
             'perceptual_loss': perceptual,
             'tv_loss': tv,
-            # 示例权重
             'total_loss': l1 + 0.5 * perceptual + 0.1 * tv
         }
         return loss_dict

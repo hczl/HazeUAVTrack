@@ -51,7 +51,7 @@ NORM_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 # 定义要评估的去雾方法列表
 # 这些名称应与您的模型配置中的 'method']['dehaze'] 字段对应
-dehazes = ['DIP', 'FALCON', 'AOD_NET', 'FFA']
+dehazes = ['AD_NET','DIP', 'FALCON', 'AOD_NET', 'FFA']
 
 # 定义模型配置文件的路径
 # 假设所有方法使用同一个基础配置，只修改 'method']['dehaze']

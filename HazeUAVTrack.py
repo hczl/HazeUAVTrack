@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import sys
 import traceback
@@ -7,11 +8,24 @@ import numpy as np
 import torch
 from torch import nn
 from tqdm import tqdm
-
+import logging
 from utils.common import call_function
 
-# HazeUAVTrack 类：集成去雾、目标检测和目标跟踪功能的端到端模型
-# 继承自 nn.Module，可以在 PyTorch 框架下进行训练和推理
+# 设置日志记录
+log_dir = "logs"
+os.makedirs(log_dir, exist_ok=True)  # 创建日志文件夹
+log_file = os.path.join(log_dir, "training.log")
+
+# 配置日志记录器
+logging.basicConfig(
+    level=logging.INFO,  # 日志级别
+    format="%(asctime)s - %(levelname)s - %(message)s",  # 日志格式
+    handlers=[
+        logging.FileHandler(log_file, mode='a'),
+        logging.StreamHandler(sys.stdout)  # 控制台输出
+    ]
+)
+logger = logging.getLogger()
 class HazeUAVTrack(nn.Module):
     def __init__(self, cfg):
         """
@@ -47,7 +61,8 @@ class HazeUAVTrack(nn.Module):
         self.tracker = call_function(cfg['method']['tracker'],
                                       f"models.trackers.{cfg['method']['tracker']}", cfg)
 
-        # 注意：self.device, self.optimizer, self.scheduler 需要在外部 (如训练脚本) 设置
+        # 初始化日志记录器
+        self.setup_logger()
 
     def train_step(self,tra_batch, clean_batch):
         """
@@ -136,6 +151,8 @@ class HazeUAVTrack(nn.Module):
                 pbar.set_postfix(postfix)
 
         # epoch 结束后，计算并打印平均损失
+        self.log_epoch_loss(epoch_losses)
+        self.logger.info(f"Epoch {epoch} finished，average Loss:")
         print(f"Epoch {epoch} 训练完成，平均 Loss:")
         for key, total in epoch_losses.items():
             avg = total / self.train_batch_nums
@@ -156,7 +173,8 @@ class HazeUAVTrack(nn.Module):
         # 定义模型保存路径
         dehaze_ckpt = f'models/dehaze/{self.dehaze_name}/ckpt'
         detector_ckpt = f'models/detector/{self.detector_name}/ckpt'
-
+        # 初始化日志
+        self.logger.info(f"Staring training, fog_strength: {fog_strength_str}")
         # 处理断点续训逻辑：尝试加载之前保存的模型权重
         if self.cfg['train']['resume_training']:
             dehaze_loaded = False
@@ -432,3 +450,40 @@ class HazeUAVTrack(nn.Module):
                     print("未加载检测模型。")
             else:
                 print("未找到检测模型文件，未加载。")
+
+    def setup_logger(self):
+        """
+        初始化日志记录器，配置日志存放路径和格式。
+        """
+        # 获取当前时间，作为日志文件名
+        time_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+
+        log_file = os.path.join(log_dir, f"{time_str}.log")
+
+        # 设置日志记录器
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            handlers=[logging.FileHandler(log_file), logging.StreamHandler()]
+        )
+        self.logger = logging.getLogger()
+
+    def log_train_info(self, epoch, loss_dict):
+        """
+        记录每个训练批次的损失和信息。
+        """
+        # 记录模型名称和当前训练损失信息
+        self.logger.info(f"Epoch {epoch} training loss:")
+        for key, value in loss_dict.items():
+            self.logger.info(f"  {key}: {value:.4f}")
+
+    def log_epoch_loss(self, epoch_losses):
+        """
+        记录每个epoch的平均损失。
+        """
+        self.logger.info(f"Epoch finished，average Loss:")
+        for key, total in epoch_losses.items():
+            avg = total / self.train_batch_nums
+            self.logger.info(f"  {key}: {avg:.4f}")

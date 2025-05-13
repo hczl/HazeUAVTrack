@@ -31,7 +31,7 @@ class YOLOV3(nn.Module):
     def predict(self, high_res_images, conf_thresh=0.95, iou_thresh=0.45):
         self.yolov3.eval()
         raw_output = self.yolov3(high_res_images)
-        return self.decode_output(raw_output, conf_thresh, iou_thresh)
+        return self.decode_output(raw_output, conf_thresh, iou_thresh)[0]
 
     def decode_output(self, raw_output, conf_thresh=0.95, iou_thresh=0.45, max_det=300):
         detections = non_max_suppression(

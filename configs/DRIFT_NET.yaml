@@ -10,7 +10,7 @@ method:
 conf_threshold: 0.5
 iou_threshold: 0.5
 dataset:
-  fog_strength: 0.75
+  fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 4

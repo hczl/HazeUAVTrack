@@ -10,7 +10,7 @@ method:
 conf_threshold: 0.4
 iou_threshold: 0.5
 dataset:
-  fog_strength: 0.75
+  fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
   batch: 4
@@ -33,3 +33,7 @@ train:
   freeze_dehaze: false
   pretrain_flag: false
   dehaze_epoch: 5
+  warmup_epochs: 5
+  warmup_start_factor: 0.01
+  lr_decay_step: 30
+  lr_decay_gamma: 0.1

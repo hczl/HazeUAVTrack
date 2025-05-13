@@ -70,10 +70,11 @@ HazeUAVTrack/
 │   ├── dehaze/       # 去雾模型代码，例如 aodnet.py, falcon.py, ffanet.py, your_model_file.py
 │   ├── detector/     # 检测模型代码，例如 denet.py, iayolo.py, your_model_file.py
 │   └── tracker/      # 追踪器代码 (如果实现为独立模块)
+├── logs/             # 记录训练信息
 ├── result/           # 实验结果输出目录
 │   ├── dehaze/       # 去雾测试结果文件
 │   └── video/        # 视频可视化结果文件
-├── app.py               # 可视化UI应用的主文件
+├── app.py            # 可视化UI应用的主文件
 ├── utils/            # 工具函数目录 (create_model, create_data, load_config等)
 ├── dehaze_test.py    # 去雾效果对比测试脚本
 ├── run.py            # 运行实验主脚本
