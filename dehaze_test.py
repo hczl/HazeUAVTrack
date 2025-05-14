@@ -54,7 +54,6 @@ NORM_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 dehazes = ['AD_NET','DIP', 'FALCON', 'AOD_NET', 'FFA']
 
 # 定义模型配置文件的路径
-# 假设所有方法使用同一个基础配置，只修改 'method']['dehaze']
 yaml_path = 'configs/DIP.yaml'
 
 # 用于存储各方法结果的字典
@@ -258,38 +257,62 @@ for dehaze in dehazes:
         print(f"{dehaze} 未处理图像。")
 
 
-def plot_metric(result_dict, title, ylabel, filename):
-    """
-    绘制指标结果的柱状图。
+def plot_metric(result_dict, title, ylabel, filename, is_integer=False, reverse_sort=True):
+    if not result_dict:
+        print(f"没有数据可绘制 {title}。")
+        return
 
-    Args:
-        result_dict (dict): 包含指标结果的字典 {方法名: 值}。
-        title (str): 图表标题。
-        ylabel (str): Y 轴标签。
-        filename (str): 保存图表的文件名 (将保存在 result_dir 中)。
-    """
-    # Sort results by value in descending order
-    items = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
-    names, values = zip(*items) # Separate method names and values
+    sorted_items = sorted(result_dict.items(),
+                          key=lambda item: item[1] if not (isinstance(item[1], float) and math.isnan(item[1])) else (-float('inf') if reverse_sort else float('inf')),
+                          reverse=reverse_sort)
 
-    plt.figure(figsize=(8, 6)) # Create figure
-    bars = plt.bar(names, values) # Plot bar chart
-    plt.title(title) # Set title
-    plt.ylabel(ylabel) # Set Y-axis label
+    names = [item[0] for item in sorted_items]
+    values = [item[1] for item in sorted_items]
 
-    # Set Y-axis limits slightly above max value
-    # Ensure it works even if values list is empty or contains only NaN
-    max_val = max(values) if values and not all(math.isnan(v) for v in values) else 0.1 # Ensure a minimum range
-    plt.ylim(0, max_val * 1.2)
+    plt.figure(figsize=(10, 7))
+    bars = plt.bar(names, values)
+    plt.title(title)
+    plt.ylabel(ylabel)
 
-    # Add value labels on top of each bar
+    # 设置x轴标签倾斜
+    plt.xticks(rotation=45, ha='right')  # 这里设置标签斜着显示
+
+    valid_values = [v for v in values if not (isinstance(v, float) and math.isnan(v))]
+    max_val = max(valid_values) if valid_values else 0.1
+    min_val = min(valid_values) if valid_values else 0
+
+    if 'MOTA' in title:
+        plt.ylim(min(0, min_val * 1.1 if min_val < 0 else 0), max(0.1, max_val * 1.2))
+    elif 'ID切换' in title:
+        plt.ylim(0, max(1, max_val * 1.2))
+    else:
+        lower_bound = min(0, min_val * (1.1 if min_val < 0 else 0.9)) if valid_values else 0
+        upper_bound = max(0.1, max_val * 1.2) if valid_values else 1.0
+        plt.ylim(lower_bound, upper_bound)
+
     for bar in bars:
         h = bar.get_height()
-        # Format label to 2 decimal places
-        plt.text(bar.get_x() + bar.get_width()/2, h + max_val * 0.02, f"{h:.2f}", ha='center') # Adjust text position
-    plt.tight_layout() # Adjust layout to prevent labels overlapping
-    plt.savefig(os.path.join(result_dir, filename)) # Save plot to file
-    plt.close() # Close plot
+        if math.isnan(h):
+            label_text = "NaN"
+        elif is_integer:
+            label_text = f"{int(h)}"
+        else:
+            label_text = f"{h:.2f}" if abs(h) >= 0.01 else f"{h:.4f}"
+
+        y_range = plt.ylim()[1] - plt.ylim()[0]
+        vertical_offset = y_range * 0.02 if y_range > 0 else 0.02
+
+        if h >= 0:
+            plt.text(bar.get_x() + bar.get_width()/2, h + vertical_offset, label_text, ha='center', va='bottom')
+        else:
+            plt.text(bar.get_x() + bar.get_width()/2, h - vertical_offset, label_text, ha='center', va='top')
+
+    plt.tight_layout()
+    save_path = os.path.join(result_dir, filename)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"图表已保存到: {save_path}")
+
 
 # Plot and save charts for each metric
 plot_metric(fps_results, "各去雾方法的平均 FPS", "FPS", "fps.png")

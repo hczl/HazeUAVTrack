@@ -7,7 +7,7 @@ method:
   detector: YOLOV3
   tracker: tracker
   track_method: bytetrack
-conf_threshold: 0.4
+conf_threshold: 0.5
 iou_threshold: 0.5
 dataset:
   fog_strength: 0.5

@@ -7,13 +7,13 @@ method:
   detector: YOLOV3
   tracker: tracker
   track_method: bytetrack
-conf_threshold: 0.4
+conf_threshold: 0.5
 iou_threshold: 0.5
 dataset:
   fog_strength: 0.5
   train_ratio: 0.8
   val_ratio: 0.1
-  batch: 4
+  batch: 2
   is_mask: true
   path: ./data/UAV-M
   data_path: UAV-benchmark-M

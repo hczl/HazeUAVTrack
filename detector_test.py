@@ -3,203 +3,364 @@ import time
 import math
 import torch
 import numpy as np
-import cv2 # 使用 OpenCV 进行视频写入和图像处理
+import cv2  # 虽然不生成视频，但 cv2 可能在其他地方被依赖，保留
 from PIL import Image
 from torchvision import transforms
 import torchvision.transforms.functional as F
-import torchvision.transforms.functional as TF # 别名，上面F已经导入了
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import traceback  # 导入 traceback 用于打印详细错误
 
-# Assuming these utility functions are in your project
+# Assumed to be available
 from utils.config import load_config
-from utils.create import create_model # This should create the HazeUAVTrack model
+from utils.create import create_model
+# Assumed metric functions are available
+from utils.metrics import compute_map, compute_f1, compute_mota
+from utils.transform import load_annotations, scale_ground_truth_boxes, scale_ignore_regions
 
-# ---- 初始设置 ----
-os.environ['TORCH_HOME'] = './.torch' # Uncomment if you need to set TORCH_HOME
-image_folder = 'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005'  # 输入图像文件夹
-output_folder = 'output/detection_results_video'  # 输出结果文件夹 (用于保存视频文件)
-video_filename = 'output_video.mp4' # 输出视频文件名
-yaml_path = 'configs/DRIFT_NET.yaml'  # 你的配置 YAML 文件路径
-max_size = 1024  # 图像resize的最大边长，与你的模型输入要求一致
-output_fps = 30 # 输出视频的帧率
+# 设置 Matplotlib 支持中文显示和负号正常显示
+plt.rcParams['font.family'] = 'SimHei'  # 设置字体为黑体 (或其他支持中文的字体)
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
-# ---- 加载配置和模型 ----
-print(f"加载配置: {yaml_path}")
-cfg = load_config(yaml_path)
+# 设置 PyTorch Hub 的缓存目录
+os.environ['TORCH_HOME'] = './.torch'
 
-model = create_model(cfg)  # Assumes create_model returns an instance of HazeUAVTrack
-model.load_model()  # Load weights using the HazeUAVTrack's load_model method
-device = torch.device(cfg['device'] if torch.cuda.is_available() else "cpu")
-model.to(device)
-model.eval()  # Set model to evaluation mode
-print(f"使用设备: {device}")
+# Define the mean and std used during training normalization
+# These should match the values used in your create_data function
+# Use lists/tuples for torchvision.transforms.functional.normalize
+NORM_MEAN_LIST = [0.485, 0.456, 0.406]
+NORM_STD_LIST = [0.229, 0.224, 0.225]
 
-# ---- 图像处理和检测函数 ----
-transform = transforms.Compose([transforms.ToTensor()])
+imgs = '1005'
+# ---- 配置参数 ----
+# 图像文件夹路径（包含用于评估的图像）
+image_folder = f'data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M{imgs}'
+# 对应的真实标签文件夹路径
+gt_label_folder = f'data/UAV-M/frame_labels/test/M{imgs}'
+# 对应的忽略区域文件夹路径
+ignore_mask_folder = f'data/UAV-M/frame_ignores/test/M{imgs}'
 
-def preprocess_image(image_pil, max_size=1024):
-    """Preprocesses PIL image: to tensor, resize, add batch dim, move to device."""
-    orig_w, orig_h = image_pil.size
-    image_tensor = transform(image_pil)
+# 基础模型配置文件路径（用于加载通用配置，如设备、最大尺寸等）
+# 这个文件中的 'method']['detector' 字段会在循环中被修改
+yaml_path = 'configs/DE_NET.yaml'  # 使用用户提供的原始配置文件路径作为基础
 
-    # Calculate resize scale and new dimensions
-    r = min(1.0, max_size / float(max(orig_w, orig_h)))
-    new_h = max(32, int(math.floor(orig_h * r / 32) * 32))
-    new_w = max(32, int(math.floor(orig_w * r / 32) * 32))
+max_size = 1024  # 模型输入图像的最大边长
+result_dir = 'result/detector'  # 结果保存目录 (图表、汇总文件等)
 
-    image_resized = F.resize(image_tensor, (new_h, new_w))
-    input_tensor = image_resized.unsqueeze(0).to(device)
+# 创建结果目录，如果不存在
+os.makedirs(result_dir, exist_ok=True)
 
-    # Return input tensor and original/new dimensions for scaling boxes
-    return input_tensor, (orig_w, orig_h), (new_w, new_h)
+transform_to_tensor = transforms.ToTensor()
+
+def preprocess_image(image_pil, max_size, mean, std):
+    w, h = image_pil.size
+    img_tensor = transform_to_tensor(image_pil)
+
+    r = min(1.0, max_size / float(max(w, h)))
+    new_h = max(32, int(math.floor(h * r / 32) * 32))
+    new_w = max(32, int(math.floor(w * r / 32) * 32))
+
+    resized_tensor = F.resize(img_tensor, (new_h, new_w))
+
+    normalized_tensor = F.normalize(resized_tensor, mean=mean, std=std)
+
+    input_tensor = normalized_tensor.unsqueeze(0)
+
+    return input_tensor, (w, h), (new_w, new_h)
+def plot_metric(result_dict, title, ylabel, filename, is_integer=False, reverse_sort=True):
+    if not result_dict:
+        print(f"没有数据可绘制 {title}。")
+        return
+
+    sorted_items = sorted(result_dict.items(),
+                          key=lambda item: item[1] if not (isinstance(item[1], float) and math.isnan(item[1])) else (-float('inf') if reverse_sort else float('inf')),
+                          reverse=reverse_sort)
+
+    names = [item[0] for item in sorted_items]
+    values = [item[1] for item in sorted_items]
+
+    plt.figure(figsize=(10, 7))
+    bars = plt.bar(names, values)
+    plt.title(title)
+    plt.ylabel(ylabel)
+
+    # 设置x轴标签倾斜
+    plt.xticks(rotation=45, ha='right')  # 这里设置标签斜着显示
+
+    valid_values = [v for v in values if not (isinstance(v, float) and math.isnan(v))]
+    max_val = max(valid_values) if valid_values else 0.1
+    min_val = min(valid_values) if valid_values else 0
+
+    if 'MOTA' in title:
+        plt.ylim(min(0, min_val * 1.1 if min_val < 0 else 0), max(0.1, max_val * 1.2))
+    elif 'ID切换' in title:
+        plt.ylim(0, max(1, max_val * 1.2))
+    else:
+        lower_bound = min(0, min_val * (1.1 if min_val < 0 else 0.9)) if valid_values else 0
+        upper_bound = max(0.1, max_val * 1.2) if valid_values else 1.0
+        plt.ylim(lower_bound, upper_bound)
+
+    for bar in bars:
+        h = bar.get_height()
+        if math.isnan(h):
+            label_text = "NaN"
+        elif is_integer:
+            label_text = f"{int(h)}"
+        else:
+            label_text = f"{h:.2f}" if abs(h) >= 0.01 else f"{h:.4f}"
+
+        y_range = plt.ylim()[1] - plt.ylim()[0]
+        vertical_offset = y_range * 0.02 if y_range > 0 else 0.02
+
+        if h >= 0:
+            plt.text(bar.get_x() + bar.get_width()/2, h + vertical_offset, label_text, ha='center', va='bottom')
+        else:
+            plt.text(bar.get_x() + bar.get_width()/2, h - vertical_offset, label_text, ha='center', va='top')
+
+    plt.tight_layout()
+    save_path = os.path.join(result_dir, filename)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"图表已保存到: {save_path}")
 
 
-def scale_boxes_to_original(boxes, orig_dims, new_dims):
-    """Scales predicted boxes from resized image coords back to original image coords."""
-
-    scaled_boxes = []
-    # print(boxes)
-    for box in boxes:
-        # box format: [x1, y1, x2, y2, conf, ...]
-        # Ensure box has at least 4 coordinates
-        if len(box) < 4:
-            continue
-        scaled_boxes.append(box)
-    return scaled_boxes
-
-
-# ---- 获取图像列表 ----
 image_files = sorted([
-    os.path.join(image_folder, f)
-    for f in os.listdir(image_folder)
+    f for f in os.listdir(image_folder)
     if f.lower().endswith(('.jpg', '.jpeg', '.png'))
 ])
+image_paths = [os.path.join(image_folder, f) for f in image_files]
 
-if not image_files:
-    print(f"错误：未在文件夹 {image_folder} 中找到任何图像文件。")
+if not image_paths:
+    print("错误: 未找到任何图像文件进行评估。")
     exit()
 
-# ---- 创建输出文件夹 ----
-os.makedirs(output_folder, exist_ok=True)
-video_output_path = os.path.join(output_folder, video_filename)
-print(f"视频将保存到: {video_output_path}")
+try:
+    first_img_pil = Image.open(image_paths[0]).convert('RGB')
+    _, orig_size_first, resized_size_first = preprocess_image(first_img_pil, max_size, NORM_MEAN_LIST, NORM_STD_LIST)
 
-# ---- OpenCV VideoWriter setup ----
-out = None # VideoWriter object
-showed_first_frame = False # Flag to show the first frame preview
+    print("加载并缩放真实标签和忽略区域...")
+    gt_labels, ignore_masks = load_annotations(gt_label_folder, ignore_mask_folder, len(image_paths))
 
-# ---- 处理每张图像 ----
-print("开始处理图像并写入视频...")
-with torch.no_grad():
-    for i, image_path in enumerate(tqdm(image_files, desc="处理图像")):
+    gt_labels_scaled = scale_ground_truth_boxes(gt_labels, orig_size_first, resized_size_first)
+    ignore_masks_scaled = scale_ignore_regions(ignore_masks, orig_size_first, resized_size_first)
+
+    if len(gt_labels_scaled) != len(image_paths) or len(ignore_masks_scaled) != len(image_paths):
+        print(f"警告: 加载的标签/忽略区域数量 ({len(gt_labels_scaled)}/{len(ignore_masks_scaled)}) 与图像数量 ({len(image_paths)}) 不匹配。")
+
+except Exception as e:
+    print(f"错误: 加载或处理标签/忽略区域失败: {e}")
+    traceback.print_exc()
+    gt_labels_scaled = []
+    ignore_masks_scaled = []
+    print("将无法计算依赖真实标签的指标 (mAP, F1, MOTA等)。")
+
+
+fps_results = {}
+map_results = {}
+f1_results = {}
+mota_results = {}
+motp_results = {}
+id_switches_results = {}
+
+# 定义去雾方法列表
+dehaze_methods = ["NONE", "FALCON", "AOD_NET", "AD_NET", 'FFA']
+
+# 创建去雾和检测器的组合
+detector_dehaze_combinations = []
+
+# 直接添加 DE_NET 和 IA_YOLOV3，不需要去雾
+detector_dehaze_combinations.append(('DE_NET', 'NONE'))
+detector_dehaze_combinations.append(('IA_YOLOV3', 'NONE'))
+
+# YOLOV11 和 YOLOV3 需要与所有去雾方法组合
+for detector in ['YOLOV11', 'YOLOV3']:
+    for dehaze in dehaze_methods:
+        detector_dehaze_combinations.append((detector, dehaze))
+
+# 对每种组合进行循环评估
+for detector_name, dehaze_method in detector_dehaze_combinations:
+    print(f"\n加载检测器: {detector_name} 与去雾方法: {dehaze_method}")
+    try:
+        cfg = load_config(yaml_path)
+    except Exception as e:
+        print(f"错误: 加载配置文件 {yaml_path} 失败: {e}")
+        traceback.print_exc()
+        print(f"跳过检测器 {detector_name} 与去雾方法 {dehaze_method}")
+        continue
+
+    if 'method' not in cfg or 'detector' not in cfg['method']:
+        print(f"警告: 配置文件 {yaml_path} 没有 'method.detector' 键。无法设置检测器名称。")
+        print(f"跳过检测器 {detector_name} 与去雾方法 {dehaze_method}")
+        continue
+
+    # 设置检测器名称和去雾方法
+    cfg['method']['detector'] = detector_name
+    cfg['method']['dehaze'] = dehaze_method
+
+    try:
+        model = create_model(cfg)
+        device = torch.device(cfg['device'] if torch.cuda.is_available() else "cpu")
+        model.to(device)
+        model.eval()
+
         try:
-            image_pil = Image.open(image_path).convert("RGB")
+            model.load_model()
         except Exception as e:
-            print(f"跳过文件 {image_path}: 无法打开或处理图像 ({e})")
-            continue
+            print(f"警告: 加载模型权重失败 for {detector_name}: {e}")
+            print("将使用未加载权重的模型。请检查 load_model 方法或权重路径。")
+            traceback.print_exc()
 
-        # 1. 预处理图像
-        input_tensor, orig_dims, new_dims = preprocess_image(image_pil, max_size)
+    except Exception as e:
+        print(f"错误: 创建或初始化模型 {detector_name} 与去雾方法 {dehaze_method} 失败: {e}")
+        traceback.print_exc()
+        print(f"跳过检测器 {detector_name} 与去雾方法 {dehaze_method}")
+        continue
 
-        # 2. 通过模型进行预测
-        # model.predict first dehazes, then detects/tracks based on cfg flags
-        # Since detector_flag=True and tracker_flag=False, it returns detector results
-        # We need the dehazed image to draw on. Let's get it separately.
-        dehazed_tensor = model.dehaze(input_tensor)
+    frame_times = []
+    current_preds = []
 
-        # Convert dehazed tensor to OpenCV format (NumPy BGR uint8)
-        # Shape (H, W, C), range [0, 255], type uint8
-        # Permute from (C, H, W) to (H, W, C)
-        dehazed_np = (dehazed_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-        # Convert RGB to BGR for OpenCV drawing functions
-        dehazed_np = cv2.cvtColor(dehazed_np, cv2.COLOR_RGB2BGR)
-
-        # Get predictions from the model (which uses the dehazed image internally)
-        predictions = model.predict(input_tensor)
-        # print(predictions)
-        # 3. 缩放预测框到原始图像尺寸
-        # predictions is a list of [x1, y1, x2, y2, conf, ...]
-        scaled_predictions = scale_boxes_to_original(predictions, orig_dims, new_dims)
-        # print(scaled_predictions)
-        # 4. 在图像上绘制结果
-        img_to_draw = dehazed_np.copy() # Draw on a copy to be safe
-
-        # Draw bounding boxes and labels
-        # This loop correctly handles the case where scaled_predictions is empty
-        for det in scaled_predictions:
-            # Ensure the detection has at least 5 elements (x1, y1, x2, y2, conf)
-            if len(det) < 5:
-                continue # Skip malformed detections
-
-            x1, y1, x2, y2, conf = det[:5] # Use only the first 5 elements
-
-            # Ensure coordinates are integers for OpenCV drawing
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
-            # Draw rectangle (OpenCV uses BGR color format)
-            # Green color (0, 255, 0), thickness 2
-            cv2.rectangle(img_to_draw, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Add text annotation (coordinates + confidence)
-            # Position text slightly above the top-left corner
-            text_x, text_y = x1, y1 - 10 # Offset slightly above the box
-            # Ensure text_y is not negative (at least 15 pixels from top for visibility)
-            text_y = max(text_y, 15)
-
-            # Label format: "conf" or "x1,y1,x2,y2,conf"
-            # Using just confidence is often less cluttered
-            label = f"{conf:.2f}"
-            # If you want coords too: label = f"{x1},{y1},{x2},{y2},{conf:.2f}"
-
-            # Draw text (OpenCV uses BGR color format)
-            # Yellow color (0, 255, 255), font scale 0.5, thickness 2
-            cv2.putText(img_to_draw, label, (text_x, text_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-
-        # 5. 视频写入
-        # Initialize VideoWriter object on the first frame
-        if out is None:
-            height, width, _ = img_to_draw.shape
-            # Define the codec (e.g., 'mp4v', 'XVID', 'MJPG')
-            # 'mp4v' is a common choice for MP4
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    with torch.no_grad():
+        for idx, img_path in enumerate(tqdm(image_paths, desc=f"评估 {detector_name} 与去雾方法 {dehaze_method}")):
             try:
-                out = cv2.VideoWriter(video_output_path, fourcc, output_fps, (width, height))
-                if not out.isOpened():
-                     raise IOError("OpenCV VideoWriter object could not be opened.")
-                print(f"成功创建视频写入对象，分辨率: {width}x{height}, 帧率: {output_fps}")
+                img_pil = Image.open(img_path).convert('RGB')
             except Exception as e:
-                print(f"错误: 无法创建视频写入对象: {e}")
-                print("后续帧将不会写入视频。请检查 OpenCV 安装和编码器兼容性。")
-                out = None # Ensure out is None if creation failed
-                # Decide if you want to stop here or continue processing without writing
-                # For this script, let's continue but skip writing
-                # break # Uncomment this line if you want to stop entirely
+                print(f"\n警告: 跳过文件: {img_path} ({e})")
+                traceback.print_exc()
+                current_preds.append([])
+                continue
 
-        # Show the first frame preview using OpenCV
-        if not showed_first_frame and out is not None: # Only show if writer is valid
-            cv2.imshow('First Frame with Detections (Press Any Key)', img_to_draw)
-            print("显示第一帧预览，请按任意键继续...")
-            cv2.waitKey(0) # Wait indefinitely until a key is pressed
-            cv2.destroyAllWindows() # Close the preview window
-            showed_first_frame = True # Mark as shown
+            input_tensor, _, _ = preprocess_image(img_pil, max_size, NORM_MEAN_LIST, NORM_STD_LIST)
+            input_tensor = input_tensor.to(device)
 
-        # Write the processed frame to the video file
-        if out is not None and out.isOpened():
-             out.write(img_to_draw)
-        # else:
-        #     print(f"警告: 视频写入对象未打开或创建失败，跳过写入帧 {i}.") # Optional warning
+            try:
+                processed_img_tensor = input_tensor
 
-# ---- 释放 VideoWriter 和清理 ----
-if out is not None and out.isOpened():
-    out.release()
-    print(f"视频已保存到: {video_output_path}")
-elif out is not None and not out.isOpened():
-     print("视频写入对象创建失败或未成功打开，视频未保存。")
-else: # out is None
-     print("未找到图像文件或处理出错，视频写入对象未创建。")
+                start_time = time.time()
+                preds = model.predict(processed_img_tensor)
+                torch.cuda.synchronize()
+                elapsed = time.time() - start_time
+                frame_times.append(elapsed)
 
+                if isinstance(preds, np.ndarray):
+                    preds = preds.tolist()
 
-cv2.destroyAllWindows() # Ensure all OpenCV windows are closed
-print("处理完成。")
+                conf_threshold = 0.82
+                filtered_boxes = [box for box in preds if len(box) > 5 and box[5] >= conf_threshold]
 
+                current_preds.append(filtered_boxes)
+
+            except Exception as e:
+                print(f"\n错误: 处理图像 {image_files[idx]} 失败: {e}")
+                traceback.print_exc()
+                current_preds.append([])
+
+    print(f"\n计算 {detector_name} 与去雾方法 {dehaze_method} 的性能指标...")
+
+    valid_frame_times = [t for t in frame_times if t is not None]
+    if valid_frame_times:
+        avg_fps = len(valid_frame_times) / sum(valid_frame_times)
+    else:
+        avg_fps = 0
+        print(f"警告: {detector_name} 与去雾方法 {dehaze_method} 没有成功处理任何帧进行计时。")
+
+    min_len = min(len(current_preds), len(gt_labels_scaled), len(ignore_masks_scaled))
+    if min_len < len(image_paths):
+        print(f"警告: 预测、GT或忽略区域列表长度不一致 ({len(current_preds)}, {len(gt_labels_scaled)}, {len(ignore_masks_scaled)}). 仅使用前 {min_len} 帧进行评估。")
+
+    current_preds_eval = current_preds[:min_len]
+    gt_labels_scaled_eval = gt_labels_scaled[:min_len]
+    ignore_masks_scaled_eval = ignore_masks_scaled[:min_len]
+
+    if not current_preds_eval or not gt_labels_scaled_eval:
+        print(f"警告: 没有有效的预测或真实标签，无法计算依赖GT的指标 for {detector_name} 与去雾方法 {dehaze_method}.")
+        avg_map = 0
+        avg_f1 = 0
+        avg_mota = 0
+        avg_motp = 0
+        total_id_switches = 0
+    else:
+        try:
+            avg_map = compute_map(current_preds_eval, gt_labels_scaled_eval, ignore_masks=ignore_masks_scaled_eval)
+            avg_f1 = compute_f1(current_preds_eval, gt_labels_scaled_eval, ignore_masks=ignore_masks_scaled_eval)
+            avg_mota, avg_motp, total_id_switches = compute_mota(current_preds_eval, gt_labels_scaled_eval, ignore_masks=ignore_masks_scaled_eval)
+        except Exception as e:
+            print(f"错误: 计算指标失败 for {detector_name} 与去雾方法 {dehaze_method}: {e}")
+            traceback.print_exc()
+            avg_map = 0
+            avg_f1 = 0
+            avg_mota = 0
+            avg_motp = 0
+            total_id_switches = 0
+            print("将指标设置为 0。")
+
+    # 如果去雾方法是 NONE，使用简单的命名
+    result_key = f"{detector_name}" if dehaze_method == "NONE" else f"{dehaze_method}_{detector_name}"
+
+    fps_results[result_key] = avg_fps
+    map_results[result_key] = avg_map
+    f1_results[result_key] = avg_f1
+    mota_results[result_key] = avg_mota
+    motp_results[result_key] = avg_motp
+    id_switches_results[result_key] = total_id_switches
+
+    print(f"\n--- {detector_name} 与去雾方法 {dehaze_method} 评估结果 ---")
+    print(f"平均 FPS (仅预测): {avg_fps:.2f}")
+    print(f"平均精度 (mAP): {avg_map:.4f}")
+    print(f"F1 得分: {avg_f1:.4f}")
+    print(f"MOTA: {avg_mota:.4f}")
+    print(f"MOTP: {avg_motp:.4f}")
+    print(f"ID切换次数: {total_id_switches}")
+    print("-" * (len(detector_name) + 10))
+
+# 生成评估结果图表
+print("\n生成评估结果图表...")
+plot_metric(fps_results, "各检测器的平均 FPS", "FPS", "detector_fps.png")
+plot_metric(map_results, "各检测器的平均 mAP", "mAP", "detector_map.png")
+plot_metric(f1_results, "各检测器的平均 F1 得分", "F1", "detector_f1.png")
+plot_metric(mota_results, "各检测器的 MOTA", "MOTA", "detector_mota.png", reverse_sort=True)
+plot_metric(motp_results, "各检测器的 MOTP", "MOTP", "detector_motp.png", reverse_sort=False)
+plot_metric(id_switches_results, "各检测器的总 ID 切换次数", "ID 切换次数", "detector_id_switches.png")
+
+# 写入汇总文件
+summary_path = os.path.join(result_dir, "detector_summary.txt")
+with open(summary_path, 'w', encoding='utf-8') as f:
+    f.write("--- Detector Performance Evaluation Summary ---\n")
+    f.write(f"Source Image Directory: {image_folder}\n")
+    f.write(f"Ground Truth Label Directory: {gt_label_folder}\n")
+    f.write(f"Ignore Regions Directory: {ignore_mask_folder}\n")
+    f.write(f"Evaluated Detectors: {', '.join([f'{detector}_{dehaze}' for detector, dehaze in detector_dehaze_combinations])}\n")
+    f.write(f"Normalization Parameters: Mean={NORM_MEAN_LIST}, Std={NORM_STD_LIST}\n")
+    f.write("-" * 30 + "\n\n")
+
+    f.write("平均 FPS (仅预测时间):\n")
+    for name, value in sorted(fps_results.items(), key=lambda item: item[1], reverse=True):
+        f.write(f"  {name}: {value:.2f}\n")
+    f.write("\n")
+
+    f.write("平均精度 (mAP):\n")
+    for name, value in sorted(map_results.items(), key=lambda item: item[1], reverse=True):
+        f.write(f"  {name}: {value:.4f}\n")
+    f.write("\n")
+
+    f.write("F1 得分:\n")
+    for name, value in sorted(f1_results.items(), key=lambda item: item[1], reverse=True):
+        f.write(f"  {name}: {value:.4f}\n")
+    f.write("\n")
+
+    f.write("MOTA:\n")
+    for name, value in sorted(mota_results.items(), key=lambda item: item[1], reverse=True):
+        f.write(f"  {name}: {value:.4f}\n")
+    f.write("\n")
+
+    f.write("MOTP:\n")
+    for name, value in sorted(motp_results.items(), key=lambda item: item[1], reverse=False):
+        f.write(f"  {name}: {value:.4f}\n")
+    f.write("\n")
+
+    f.write("总 ID 切换次数:\n")
+    for name, value in sorted(id_switches_results.items(), key=lambda item: item[1], reverse=False):
+        f.write(f"  {name}: {int(value)}\n")
+    f.write("\n")
+
+print(f"汇总结果已保存到: {summary_path}")
+print("\n所有检测器评估完成。")
