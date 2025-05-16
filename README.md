@@ -77,6 +77,7 @@ HazeUAVTrack/
 ├── app.py            # 可视化UI应用的主文件
 ├── utils/            # 工具函数目录 (create_model, create_data, load_config等)
 ├── dehaze_test.py    # 去雾效果对比测试脚本
+├── detector_test.py  # 目标检测效果独立测试脚本
 ├── run.py            # 运行实验主脚本
 ├── requirements.txt  # Python依赖列表 (如果手动创建)
 └── README.md         # 本文件
@@ -146,7 +147,7 @@ import torch
 import torch.nn as nn
 
 class your_new_dehaze_model(nn.Module):
-    def __init__(self, config): # config 是从yaml加载的参数字典
+    def __init__(self):
         super().__init__()
         # 构建你的模型层
         pass
@@ -301,6 +302,7 @@ class YourNewTracker(nn.Module): # 可以继承nn.Module，如果需要保存状
 
 *   **模型保存:** 训练完成后的模型权重文件会根据配置保存到指定目录。
 *   **去雾测试结果:** 运行 `dehaze_test.py` 生成的 PSNR, SSIM, FPS 等指标数据和图表将保存在 `result/dehaze/` 目录下。
+*   **检测测试结果:** 运行 `detector_test.py` 生成的 mAP, MOTA, FPS 等指标数据和图表将保存在 `result/detctor/` 目录下。
 *   **视频可视化:** 使用 `app/app.py` 生成的带检测/追踪框的视频文件将保存在 `result/video/` 目录下。
 
 ## 贡献与问题反馈

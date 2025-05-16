@@ -279,7 +279,7 @@ class HazeUAVTrack(nn.Module):
                                      f"{self.dehaze_name}_{self.detector_name}_dehaze_ckpt_epoch_{epoch + 1}.pth")
 
 
-    @torch.no_grad() # 禁用梯度计算，用于评估模式
+    @torch.no_grad()
     def evaluate(self, val_loader, val_clean_loader):
         """
         在验证集上评估模型的性能，计算并返回平均损失。

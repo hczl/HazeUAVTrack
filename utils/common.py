@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 
 def call_function(method_name, module_prefix, *args):
-    """Dynamically imports and calls a processing function (core version)."""
     module_name = f'{module_prefix}.{method_name}'
     spec = importlib.util.find_spec(module_name)
     module = importlib.util.module_from_spec(spec)
