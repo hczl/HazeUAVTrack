@@ -1,7 +1,15 @@
+import torch.nn.functional as F
+from torchvision.models import vgg16
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import vgg16
+from ultralytics import YOLO
+from ultralytics.utils.loss import v8DetectionLoss
+from ultralytics.utils.ops import non_max_suppression, xywhn2xyxy, xyxy2xywh
+from ultralytics.utils.tal import make_anchors
+
 
 class ChannelAttention(nn.Module):
 
@@ -261,13 +269,6 @@ class AD_NET(nn.Module):
 
         return out
 
-import torch
-import torch.nn as nn
-from ultralytics import YOLO
-from ultralytics.utils.loss import v8DetectionLoss
-from ultralytics.utils.ops import non_max_suppression, xywhn2xyxy, xyxy2xywh, xywh2xyxy
-from ultralytics.utils.tal import make_anchors
-import types
 def custom_v11_call(self, preds, batch):
     """
         计算 box, cls 和 dfl 损失的总和，并乘以 batch size。
@@ -420,7 +421,7 @@ def custom_v11_call(self, preds, batch):
 
 def process_batch(batch):
     import torch
-    from torch import empty, cat, stack, full, as_tensor
+    from torch import empty, cat, full, as_tensor
 
     if len(batch) == 2:
         images, targets = batch

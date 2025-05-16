@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import vgg16
 
+
 class ChannelAttention(nn.Module):
 
     def __init__(self, in_channels, ratio=4):
@@ -71,8 +72,12 @@ class EfficientCSAttention(nn.Module):
 
 
     def forward(self, x):
-        att = self.ca(x) * self.sa(x)
-        return self.mix(x * att)
+        ca_att = self.ca(x)
+        sa_att = self.sa(x)
+        att = ca_att * sa_att
+        attended_x = x * att
+        out = self.mix(attended_x)
+        return out
 
 
 class PerceptualLoss(nn.Module):
@@ -84,8 +89,17 @@ class PerceptualLoss(nn.Module):
         for param in self.vgg.parameters():
             param.requires_grad = False
 
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, -1, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, -1, 1, 1))
+
+    def preprocess(self, x):
+        x = (x - self.mean) / self.std
+        return x
+
     def forward(self, pred, target):
-        return F.l1_loss(self.vgg(pred), self.vgg(target))
+        pred_vgg = self.vgg(self.preprocess(pred))
+        target_vgg = self.vgg(self.preprocess(target))
+        return F.l1_loss(pred_vgg, target_vgg)
 
 
 def total_variation_loss(image):
@@ -98,20 +112,18 @@ def total_variation_loss(image):
 
 
 class AD_NET_Core(nn.Module):
-
     def __init__(self, in_channels, out_channels, base_channels=32, num_blocks=[2, 2, 2]):
         super().__init__()
 
         self.init_conv = nn.Sequential(
-            nn.Conv2d(in_channels, base_channels, 3, padding=1),
+            nn.Conv2d(in_channels, base_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(base_channels),
             nn.ReLU(inplace=True)
         )
 
-        self.encoder = nn.ModuleList([
-            self._make_stage(base_channels, base_channels, num_blocks[0], stride=2),
-            self._make_stage(base_channels, base_channels * 2, num_blocks[1], stride=2),
-            self._make_stage(base_channels * 2, base_channels * 4, num_blocks[2], stride=1)
-        ])
+        self.encoder0 = self._make_stage(base_channels, base_channels, num_blocks[0], stride=1)
+        self.encoder1 = self._make_stage(base_channels, base_channels * 2, num_blocks[1], stride=2)
+        self.encoder2 = self._make_stage(base_channels * 2, base_channels * 4, num_blocks[2], stride=2)
 
         self.attentions = nn.ModuleList([
             EfficientCSAttention(base_channels),
@@ -120,20 +132,16 @@ class AD_NET_Core(nn.Module):
         ])
 
         self.skip_convs = nn.ModuleList([
-            nn.Conv2d(base_channels, base_channels // 2, 1),
-            nn.Conv2d(base_channels * 2, base_channels, 1),
-            nn.Conv2d(base_channels * 4, base_channels * 2, 1)
+             nn.Conv2d(base_channels, base_channels // 2, 1, bias=False),
+             nn.Conv2d(base_channels * 2, base_channels, 1, bias=False),
         ])
 
-        self.adjust_s2_conv = nn.Conv2d(base_channels, 256, kernel_size=1)
-
         self.decoder0 = self._make_decoder_upsample(base_channels * 4, base_channels * 2)
-        self.decoder1 = self._make_decoder_upsample(base_channels * 2 + 256, base_channels)
+        self.decoder1 = self._make_decoder_upsample(base_channels * 2 + base_channels, base_channels)
         self.decoder2 = self._make_decoder_noup(base_channels + base_channels // 2, base_channels // 2)
 
         self.output = nn.Sequential(
             nn.Conv2d(base_channels // 2, out_channels, 3, padding=1),
-            # Sigmoid is added in the outer U-Net
         )
 
 
@@ -161,33 +169,28 @@ class AD_NET_Core(nn.Module):
     def forward(self, x):
         x0 = self.init_conv(x)
 
-        s1 = self.encoder[0](x0)
-        s1 = self.attentions[0](s1)
+        s0 = self.encoder0(x0)
+        s0_att = self.attentions[0](s0)
 
-        s2 = self.encoder[1](s1)
-        s2 = self.attentions[1](s2)
+        s1 = self.encoder1(s0_att)
+        s1_att = self.attentions[1](s1)
 
-        s3 = self.encoder[2](s2)
-        s3 = self.attentions[2](s3)
+        s2 = self.encoder2(s1_att)
+        s2_att = self.attentions[2](s2)
 
-        d3 = self.decoder0(s3)
+        d0 = self.decoder0(s2_att)
 
-        skip_s2 = self.skip_convs[1](s2)
-        skip_s2_adjusted = self.adjust_s2_conv(skip_s2)
-        upsampled_skip_s2_adjusted = F.interpolate(skip_s2_adjusted, size=d3.shape[-2:], mode='nearest')
+        skip_s1 = self.skip_convs[1](s1_att)
+        d1_input = torch.cat([d0, skip_s1], dim=1)
+        d1 = self.decoder1(d1_input)
 
-        d3_input_to_decoder1 = torch.cat([d3, upsampled_skip_s2_adjusted], dim=1)
+        skip_s0 = self.skip_convs[0](s0_att)
+        d2_input = torch.cat([d1, skip_s0], dim=1)
+        d2 = self.decoder2(d2_input)
 
-        d2 = self.decoder1(d3_input_to_decoder1)
+        out = self.output(d2)
 
-        skip_s1 = self.skip_convs[0](s1)
-        upsampled_skip_s1 = F.interpolate(skip_s1, size=d2.shape[-2:], mode='nearest')
-
-        d2_input_to_decoder2 = torch.cat([d2, upsampled_skip_s1], dim=1)
-
-        d1 = self.decoder2(d2_input_to_decoder2)
-
-        return self.output(d1)
+        return out
 
 
 class AD_NET(nn.Module):
@@ -195,44 +198,49 @@ class AD_NET(nn.Module):
         super().__init__()
 
         self.enc0 = nn.Sequential(
-            nn.Conv2d(in_channels, external_channels[0], 3, padding=1),
+            nn.Conv2d(in_channels, external_channels[0], 3, padding=1, bias=False),
+            nn.BatchNorm2d(external_channels[0]),
             nn.ReLU(inplace=True)
         )
 
         self.enc1 = nn.Sequential(
-            nn.Conv2d(external_channels[0], external_channels[1], 3, stride=2, padding=1),
+            nn.Conv2d(external_channels[0], external_channels[1], 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(external_channels[1]),
             nn.ReLU(inplace=True)
         )
 
         self.enc2 = nn.Sequential(
-            nn.Conv2d(external_channels[1], external_channels[2], 3, stride=2, padding=1),
+            nn.Conv2d(external_channels[1], external_channels[2], 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(external_channels[2]),
             nn.ReLU(inplace=True)
         )
 
         self.ad_net_core = AD_NET_Core(
             in_channels=external_channels[2],
             out_channels=external_channels[2],
-            base_channels=base_channels, # Use the provided base_channels for the core
+            base_channels=base_channels,
             num_blocks=num_blocks
         )
 
         self.dec1 = nn.Sequential(
-            nn.ConvTranspose2d(external_channels[2], external_channels[1], kernel_size=2, stride=2),
+            nn.ConvTranspose2d(external_channels[2], external_channels[1], kernel_size=2, stride=2, bias=False),
+            nn.BatchNorm2d(external_channels[1]),
             nn.ReLU(inplace=True)
         )
-
         self.dec1_conv = nn.Sequential(
-            nn.Conv2d(external_channels[1] + external_channels[1], external_channels[0], 3, padding=1),
+            nn.Conv2d(external_channels[1] + external_channels[1], external_channels[0], 3, padding=1, bias=False),
+            nn.BatchNorm2d(external_channels[0]),
             nn.ReLU(inplace=True)
         )
 
         self.dec2 = nn.Sequential(
-            nn.ConvTranspose2d(external_channels[0], external_channels[0], kernel_size=2, stride=2),
+            nn.ConvTranspose2d(external_channels[0], external_channels[0], kernel_size=2, stride=2, bias=False),
+            nn.BatchNorm2d(external_channels[0]),
             nn.ReLU(inplace=True)
         )
-
         self.dec2_conv = nn.Sequential(
-            nn.Conv2d(external_channels[0] + external_channels[0], external_channels[0], 3, padding=1),
+            nn.Conv2d(external_channels[0] + external_channels[0], external_channels[0], 3, padding=1, bias=False),
+            nn.BatchNorm2d(external_channels[0]),
             nn.ReLU(inplace=True)
         )
 
@@ -240,6 +248,7 @@ class AD_NET(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
         self.perceptual_loss_fn = PerceptualLoss()
+
 
     def forward(self, x):
         e0 = self.enc0(x)
@@ -264,13 +273,19 @@ class AD_NET(nn.Module):
     def forward_loss(self, haze_img, clean_img):
         dehaze = self(haze_img)
 
-        l1 = F.l1_loss(dehaze, clean_img)
+        mse = F.mse_loss(dehaze, clean_img)
         perceptual = self.perceptual_loss_fn(dehaze, clean_img)
         tv = total_variation_loss(dehaze)
 
+        mse_weight = 1.0
+        perceptual_weight = 0.05
+        tv_weight = 0.001
+
+        total_loss = mse_weight * mse + perceptual_weight * perceptual + tv_weight * tv
+
         return {
-            'l1_loss': l1,
+            'mse_loss': mse,
             'perceptual_loss': perceptual,
             'tv_loss': tv,
-            'total_loss': l1 + 0.5 * perceptual + 0.1 * tv
+            'total_loss': total_loss
         }

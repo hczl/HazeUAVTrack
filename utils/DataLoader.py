@@ -401,7 +401,7 @@ class UAVDataLoaderBuilder:
         train_set_vids = video_folders_in_processed_root[:train_end]
         val_set_vids = video_folders_in_processed_root[train_end:val_end]
         test_set_vids = video_folders_in_processed_root[val_end:]
-
+        print(test_set_vids)
         datasets = {}
         # 分割并处理每个集合
         for split_name, video_list in [('train', train_set_vids), ('val', val_set_vids), ('test', test_set_vids)]:

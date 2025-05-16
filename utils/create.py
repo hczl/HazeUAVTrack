@@ -21,7 +21,6 @@ def create_data(cfg):
         val_ratio=cfg['dataset']['val_ratio'],
         transform=transform
     )
-
     # 是否使用随机索引
     train_num_samples = len(train_dataset)
     val_num_samples = len(val_dataset)

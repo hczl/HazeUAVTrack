@@ -67,8 +67,8 @@ HazeUAVTrack/
 ├── data/             # 数据集目录
 │   └── UAV-M/        # UAV-M 数据集存放位置 (请将下载的数据集解压到此处)
 ├── models/           # 模型代码目录 (存放去雾、检测、追踪等模型的实现)
-│   ├── dehaze/       # 去雾模型代码，例如 aodnet.py, falcon.py, ffanet.py, your_model_file.py
-│   ├── detector/     # 检测模型代码，例如 denet.py, iayolo.py, your_model_file.py
+│   ├── dehaze/       # 去雾模型代码文件夹，例如 aodnet, falcon, your_model_file
+│   ├── detector/     # 检测模型代码文件夹，例如 denet, iayolo, your_model_file
 │   └── tracker/      # 追踪器代码 (如果实现为独立模块)
 ├── logs/             # 记录训练信息
 ├── result/           # 实验结果输出目录

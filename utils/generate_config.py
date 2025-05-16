@@ -156,7 +156,7 @@ def apply_modifications(cfg: CommentedMap, modifications: dict, prefix=''):
 # update_yaml_dir('../configs', comment_out_path='../configs/stripped_comments.json')
 
 modifications = {
-    "conf_threshold": 0.5,
+    "dataset.fog_strength": 0.5,
 }
 
 update_yaml_dir('../configs', comment_out_path='../configs/stripped_comments.json', modifications=modifications)
