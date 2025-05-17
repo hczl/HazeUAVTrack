@@ -1,10 +1,10 @@
-device: cuda
+device: cuda:0
 detector_flag: true
 tracker_flag: true
 method:
   haze: MiDaS_Deep
   dehaze: NONE
-  detector: YOLOV3
+  detector: AD_YOLOV11
   tracker: tracker
   track_method: bytetrack
 conf_threshold: 0.5

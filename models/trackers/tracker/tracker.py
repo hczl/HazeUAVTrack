@@ -1,5 +1,6 @@
 # models/trackers/boxmot_tracker.py
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -14,10 +15,10 @@ class tracker(nn.Module):
 
         tracker_type = cfg['method']['track_method']  # e.g. 'bytetrack'
         config_path = os.path.join(os.path.dirname(__file__), 'configs', f'{tracker_type}.yaml')
-
         self.tracker = create_tracker(
             tracker_type=tracker_type,
             tracker_config=config_path,
+            reid_weights=Path('osnet_x0_25_msmt17.pt'),
             device=cfg.get('device', 'cuda')
         )
 

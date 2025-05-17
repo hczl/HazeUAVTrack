@@ -1,4 +1,4 @@
-device: cuda
+device: cuda:0
 detector_flag: false
 tracker_flag: false
 method:
