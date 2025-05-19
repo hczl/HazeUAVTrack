@@ -42,34 +42,56 @@ def scale_ignore_regions(ignore_masks_all, orig_size, resized_size):
         scaled_all.append(scaled_frame)
     return scaled_all
 
-def load_annotations(label_dir, ignore_dir, num_frames):
+def load_annotations(label_dir,
+                     ignore_dir,
+                     num_frames,
+                     wanted_cls=(1, 2, 3),  # car/truck/bus
+                     occ_max=3,
+                     oov_max=3):
     gts, ignores = [], []
 
     for idx in range(num_frames):
-        frame_name = f"img{idx+1:06d}.txt"
-        label_path = os.path.join(label_dir, frame_name)
-        ignore_path = os.path.join(ignore_dir, frame_name)
+        fname = f"img{idx+1:06d}.txt"
+        lab_p = os.path.join(label_dir, fname)
+        ign_p = os.path.join(ignore_dir, fname)
 
-        frame_gt = []
-        if os.path.exists(label_path):
-            with open(label_path, 'r') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 6:
-                        _, target_id, x, y, w, h = map(float, parts[:6])
-                        x1, y1, x2, y2 = x, y, x + w, y + h
-                        frame_gt.append([x1, y1, x2, y2, int(target_id)])
+        frame_gt, frame_ig = [], []
+
+        # ---------- GT ------------
+        if os.path.isfile(lab_p):
+            with open(lab_p) as fh:
+                for ln in fh:
+                    parts = ln.strip().split(',')
+                    if len(parts) < 9:
+                        continue
+                    (frame_i, tid, x, y, w, h,
+                     outv, occ, cls) = map(float, parts[:9])
+
+                    if int(frame_i) != idx+1:
+                        continue                         # 只取这一帧
+                    if int(tid) <= 0:
+                        continue                         # -1 / 0 忽略
+                    if int(cls) not in wanted_cls:
+                        continue
+                    if occ > occ_max or outv > oov_max:
+                        # 高遮挡、出画 → 忽略框
+                        frame_ig.append([x, y, x+w, y+h])
+                        continue
+
+                    x1, y1, x2, y2 = x, y, x+w, y+h
+                    frame_gt.append([x1, y1, x2, y2, int(tid)])
+
+        # ---------- Ignore (额外文件) ----------
+        if os.path.isfile(ign_p):
+            with open(ign_p) as fh:
+                for ln in fh:
+                    parts = ln.strip().split(',')
+                    if len(parts) < 6:
+                        continue
+                    _, _, x, y, w, h = map(float, parts[:6])
+                    frame_ig.append([x, y, x+w, y+h])
+
         gts.append(frame_gt)
-
-        frame_ignore = []
-        if os.path.exists(ignore_path):
-            with open(ignore_path, 'r') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 6:
-                        _, target_id, x, y, w, h = map(float, parts[:6])
-                        x1, y1, x2, y2 = x, y, x + w, y + h
-                        frame_ignore.append([x1, y1, x2, y2])
-        ignores.append(frame_ignore)
+        ignores.append(frame_ig)
 
     return gts, ignores

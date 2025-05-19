@@ -18,7 +18,7 @@ class tracker(nn.Module):
         self.tracker = create_tracker(
             tracker_type=tracker_type,
             tracker_config=config_path,
-            reid_weights=Path('osnet_x0_25_msmt17.pt'),
+            reid_weights=Path('models/trackers/tracker/osnet_x0_25_msmt17.pt'),
             device=cfg.get('device', 'cuda')
         )
 
@@ -42,10 +42,7 @@ class tracker(nn.Module):
                 # 如果检测数据不符合预期，可以选择打印警告或跳过
                 print(f"Warning: Invalid detection format {detection}")
                 continue
-
             detections_for_tracker.append(detection_with_class)
         detections_for_tracker = np.array(detections_for_tracker)
         tracks = self.tracker.update(detections_for_tracker, img_np)
-
-
         return tracks

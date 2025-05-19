@@ -26,6 +26,31 @@
 *   **合成雾生成:** 支持根据配置生成合成雾图像用于训练或测试。
 *   **GPU 内存管理:** `run.py` 脚本包含训练后的内存清理机制。
 
+## 模型打包与解包
+
+本项目提供了两个实用脚本，支持对训练完成的模型进行打包归档与远程解包还原：
+
+### 1. 打包模型 (pack_checkpoints.py)
+
+将指定子目录中的 ```.pth```, ```.pt```, ```.ckpt``` 文件统一收集、重命名，生成映射文件 ```manifest.json```，并压缩为 ```.tar.gz``` 文件，方便迁移部署。
+
+#### 用法示例：
+
+```bash
+python pack_checkpoints.py HazeUAVTrack packed_models --search-subdirs models/dehaze models/detector --extensions pth pt ckpt
+```
+
+### 2. 解包模型 (unpack_checkpoints.py)
+
+解压 ```.tar.gz``` 文件并根据 ```manifest.json``` 自动恢复模型到原始目录结构。
+
+#### 用法示例：
+```bash
+python unpack_checkpoints.py packed_models.tar.gz /path/to/HazeUAVTrack```
+```
+脚本将自动验证路径安全性并处理非法路径，确保解压后的模型准确恢复。
+
+
 ## 安装指南
 
 ### 1. 环境准备
@@ -59,6 +84,16 @@ pip install -r requirements.txt
 [百度网盘](https://pan.baidu.com/s/1WgE9XaYaio_DyWHT1A6lIg?pwd=vti5)
 
 请确保解压后的数据集文件位于 `HazeUAVTrack/data/UAV-M/` 路径下。
+
+### 5. 使用已有训练模型（可选）
+将模型存放于```HazeUAVTrack/utils```路径下，并执行
+```bash
+python ./utils/unpack_checkpoints.py```
+```
+
+**已训练模型下载链接:**
+[百度网盘](https://pan.baidu.com/s/19bs5Cj2nSFmks_niUDUh3A?pwd=vti5)
+
 
 ## 项目结构
 ```

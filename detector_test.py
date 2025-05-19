@@ -19,11 +19,14 @@ plt.rcParams['font.family'] = 'SimHei'
 plt.rcParams['axes.unicode_minus'] = False
 os.environ['TORCH_HOME'] = './.torch'
 
-TRACKER_NAMES = ['strongsort', 'deepocsort', 'botsort']
+TRACKER_NAMES = ['boosttrack','strongsort', 'deepocsort', 'botsort','ocsort']
+
 TRACKER_THRESHOLDS = {
-    'StrongSORT': (0.6, 0.5),
-    'DeepOCSORT': (0.65, 0.55),
-    'BoT-SORT': (0.7, 0.6)
+    'boosttrack': (0.5, 0.5),
+    'strongsort': (0.5, 0.5),
+    'deepocsort': (0.5, 0.5),
+    'botsort': (0.5, 0.5),
+    'ocsort': (0.5, 0.5)
 }
 
 NORM_MEAN_LIST = [0.485, 0.456, 0.406]
@@ -115,9 +118,11 @@ def plot_metric(result_dict, title, ylabel, filename, save_dir, is_integer=False
     plt.close()
     print(f"图表已保存到: {save_path}")
 
-
-detector_dehaze_combinations = [("AD_YOLOV11", "NONE"), ("DE_NET", "NONE"), ("IA_YOLOV3", "NONE"), ("YOLOV3", "NONE"),
-                                ("YOLOV11", "NONE")]
+detector_dehaze_combinations = [
+    ("AD_YOLOV11", "NONE"), ("DE_NET", "NONE"), ("IA_YOLOV3", "NONE"),
+    ("YOLOV3", "NONE"), ("YOLOV11", "NONE"),
+    ('YOLOV3', 'FFA'), ('YOLOV11', 'FFA')
+]
 
 for current_tracker_name in TRACKER_NAMES:
     print(f"\n################ 开始处理追踪器: {current_tracker_name} ################")
@@ -163,7 +168,7 @@ for current_tracker_name in TRACKER_NAMES:
                 cfg['method']['detector'] = detector_name
                 cfg['method']['dehaze'] = dehaze_method
                 cfg['method']['track_method'] = current_tracker_name
-
+                cfg['method']['conf_threshold'] = active_conf_threshold
                 model = create_model(cfg)
                 device = torch.device(cfg['device'] if torch.cuda.is_available() else "cpu")
                 model.load_model()

@@ -259,7 +259,7 @@ class YOLOV11(nn.Module):
         self.cfg = cfg
         self.nc = int(1)
         YOLOV11_wrapper = YOLO('yolo11.yaml')
-        YOLOV11_wrapper.load('yolo11n.pt')
+        YOLOV11_wrapper.load('models/detector/YOLOV11/yolo11n.pt')
         self.YOLOV11 = YOLOV11_wrapper.model
         self.YOLOV11.nc = self.nc
         self.loss_fn = YOLOV11_wrapper.loss

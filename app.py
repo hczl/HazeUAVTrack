@@ -418,7 +418,7 @@ class App(tk.Tk):
 
         # 路径变量，带有默认值
         # !!! 在这里设置您想要的默认路径 !!!
-        self.yaml_path_var = tk.StringVar(value="configs/DRIFT_NET.yaml") # 示例默认 YAML 路径
+        self.yaml_path_var = tk.StringVar(value="configs/AD_YOLOV11.yaml") # 示例默认 YAML 路径
         # 示例默认视频帧文件夹路径
         self.video_folder_var = tk.StringVar(value="data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005")
         # !!! ---------------------------------- !!!
