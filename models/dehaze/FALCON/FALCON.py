@@ -70,7 +70,7 @@ class FALCON(nn.Module):
     def _initialize_weights(self, name):
         for m in self.modules():
             self._init_weights(m, name)
-        print(f"Model is initialized with {name}")
+        # print(f"Model is initialized with {name}")
 
     def forward(self, x, w = 1, trainable=True):
         x_ = []

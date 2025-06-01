@@ -41,7 +41,8 @@ transform = transforms.Compose([transforms.ToTensor()])
 image_files = [] # 视频帧文件列表
 current_frame_index = -1 # 当前处理的帧索引，-1 表示未开始或已完成
 max_size = 1024 # 默认最大图像尺寸 (用于模型输入)
-
+NORM_MEAN = [0.485, 0.456, 0.406]
+NORM_STD = [0.229, 0.224, 0.225]
 # ---- 图像处理和检测函数 (改编自您的脚本) ----
 def preprocess_image(image_pil, max_size):
     """
@@ -70,6 +71,7 @@ def preprocess_image(image_pil, max_size):
     # 这里的 resize 会将图像拉伸/压缩到新的 (new_h, new_w) 尺寸，不一定保持纵横比。
     # 如果需要保持纵横比并填充，需要更复杂的逻辑。当前代码是简单 resize。
     image_resized_tensor = F.resize(image_tensor, (new_h, new_w))
+    # image_resized_tensor = F.normalize(image_resized_tensor, mean=NORM_MEAN, std=NORM_STD)
     # 假设模型期望 float Tensor，值在 [0, 1] 范围
     input_tensor = image_resized_tensor.unsqueeze(0).to(device) # 添加批次维度并发送到设备
 
@@ -209,12 +211,11 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         model.eval() # 设置模型为评估模式 (关闭 dropout 等)
 
         # --- 从配置设置模型的初始阈值 ---
-        initial_conf = cfg.get('detector_conf_thresh', 0.25) # 从配置获取初始置信度阈值
-        initial_iou = cfg.get('detector_iou_thresh', 0.45) # 从配置获取初始 IoU 阈值
+        initial_conf = cfg.get('detector_conf_thresh', 0.85) # 从配置获取初始置信度阈值
+        initial_iou = cfg.get('detector_iou_thresh', 0.5) # 从配置获取初始 IoU 阈值
         try:
             # 尝试直接设置模型的属性
             if hasattr(model, 'conf_thresh'):
-                model.conf_thresh = initial_conf
                 conf_var.set(initial_conf) # 也将 UI 滑动条的值设置为初始配置值
             else:
                  print("Warning: Model object does not have a 'conf_thresh' attribute.")
@@ -268,7 +269,7 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
     # --- 主处理循环 ---
     # 使用 tqdm 显示控制台进度条
     for i, image_path in enumerate(tqdm(image_files, desc="Processing Frames")):
-        if stop_event.is_set(): # 检查停止事件是否被设置
+        if stop_event.is_set():
             status_var.set("Status: Processing stopped.") # 更新 UI 状态
             break # 如果停止事件被设置，则跳出循环，停止处理
 
@@ -284,8 +285,6 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         # 这里更新模型的内部状态，使预测使用最新的阈值
         try:
             if model is not None: # 确保模型已成功加载
-                if hasattr(model, 'conf_thresh'):
-                    model.conf_thresh = current_conf_thresh
                 if hasattr(model, 'iou_thresh'):
                     model.iou_thresh = current_iou_thresh
         except Exception as e:
@@ -313,13 +312,6 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
             # 获取去雾后的图像 (这是模型输出的调整后尺寸的图像)
             # 我们会将其调整回原始尺寸用于绘制。
             if model is not None: # 确保模型可用
-                # 假设模型有 dehaze 方法，返回去雾后的 Tensor
-                # 如果模型没有单独的 dehaze 方法，或者预测函数返回了去雾图像，需要调整这里
-                # 注意：原始的 DRIFT_NET 代码没有 dehaze 方法。这里假设模型返回的某个输出是去雾图像。
-                # 或者 dehaze 只是一个占位符。需要根据实际模型实现调整。
-                # 如果模型只输出预测框，那么 dehazed_tensor 部分可能需要移除或替换。
-                # 为了演示，假设 model.dehaze(input_tensor) 返回去雾图像 Tensor。
-                # 如果模型没有 dehaze 方法，可以跳过这步，直接用原始图像进行绘制。
                 try:
                     # 假设模型有 dehaze 方法
                     dehazed_tensor = model.dehaze(input_tensor) # [1, C, H', W']
@@ -341,13 +333,7 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
                 # 获取预测结果。模型应该使用上面设置的内部 conf_thresh 和 iou_thresh 来过滤预测。
                 # model.predict 应返回相对于 new_dims 的预测框列表或 Tensor。
                 predictions = model.predict(input_tensor) # 这些坐标是相对于 new_dims 的
-
-            else: # 模型加载失败，使用占位符
-                 # 如果模型加载失败，使用原始图像的 resized 版本作为显示图像
-                 dehazed_np_resized = cv2.resize(image_np_original_bgr, (new_dims[0], new_dims[1]), interpolation=cv2.INTER_LINEAR)
-                 predictions = [] # 没有预测结果如果模型失败
-
-
+        predictions = [b for b in predictions if len(b) > 5 and b[5] >= current_conf_thresh]
         # 3. 将预测框从调整后尺寸坐标缩放回原始尺寸坐标
         # 这些预测结果应该已经由模型的内部阈值过滤过了
         scaled_predictions = scale_boxes_to_original(predictions, orig_dims, new_dims)
@@ -425,7 +411,7 @@ class App(tk.Tk):
 
 
         # 滑动条变量 (DoubleVar 用于存储浮点数)
-        self.conf_var = tk.DoubleVar(value=0.25) # 默认置信度 (将从配置更新)
+        self.conf_var = tk.DoubleVar(value=0.85) # 默认置信度 (将从配置更新)
         self.iou_var = tk.DoubleVar(value=0.45)  # 默认 IoU (将从配置更新)
 
         # 状态文本变量 (StringVar 用于存储字符串)

@@ -24,8 +24,8 @@ os.environ['TORCH_HOME'] = './.torch'
 RESULT_DIR = 'result/detector_combined'
 os.makedirs(RESULT_DIR, exist_ok=True)
 
-TRACKER_NAMES = ['boosttrack', 'strongsort', 'deepocsort', 'botsort', 'ocsort']
-TRACKER_THRESHOLDS = {name: (0.5, 0.5) for name in TRACKER_NAMES}
+TRACKER_NAMES = ['boosttrack', 'botsort', 'ocsort', 'ByteTrack']
+FIXED_THRESHOLDS = [0.5, 0.85]
 NORM_MEAN = [0.485, 0.456, 0.406]
 NORM_STD = [0.229, 0.224, 0.225]
 SOURCE_FOLDERS = ['M1005', 'M0301', 'M1002', 'M1202', 'M0205', 'M1007']
@@ -69,7 +69,7 @@ class InferenceImageDataset(Dataset):
         return tensor, path
 
 
-def worker(gpu_id, source_folder, tracker, detector, dehaze, fog_strengths, return_list):
+def worker(gpu_id, source_folder, tracker, detector, dehaze, fog_strengths, return_list, fixed_threshold):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     torch.cuda.set_device(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -96,8 +96,8 @@ def worker(gpu_id, source_folder, tracker, detector, dehaze, fog_strengths, retu
             gt_dir = os.path.join(BASE_GT_LABEL, source_folder)
             ig_dir = os.path.join(BASE_IGNORE, source_folder)
 
-            thresh_idx = 0 if fog == 0.5 else 1
-            cfg['method']['conf_threshold'] = TRACKER_THRESHOLDS[tracker][thresh_idx]
+
+            cfg['method']['conf_threshold'] = fixed_threshold
             cfg['dataset']['fog_strength'] = fog
             model = create_model(cfg)
             model.load_model()
@@ -150,47 +150,71 @@ def worker(gpu_id, source_folder, tracker, detector, dehaze, fog_strengths, retu
 
 if __name__ == "__main__":
     manager = Manager()
-    for tracker in TRACKER_NAMES:
-        summary = {}
-        for detector, dehaze in DETECTOR_DEHAZE:
-            ret_list = manager.list()
-            procs = []
-            for gpu_id, folder in enumerate(SOURCE_FOLDERS):
-                p = Process(target=worker,
-                            args=(gpu_id, folder, tracker,
-                                  detector, dehaze, FOG_STRENGTHS,
-                                  ret_list))
-                p.start()
-                procs.append(p)
-            for p in procs:
-                p.join()
+    FIXED_THRESHOLDS = [0.5, 0.85]
 
-            agg = {}
-            arr = list(ret_list)
-            for fog in FOG_STRENGTHS:
-                vals = [v.get(fog, (np.nan,) * 6) for v in arr]
-                mat = np.array(vals, dtype=float)
-                means = np.nanmean(mat, axis=0)
-                agg[fog] = means
-            summary[(detector, dehaze)] = agg
+    for threshold in FIXED_THRESHOLDS:
+        result_dir = f"result/detector_combined_{int(threshold * 100):03d}"
+        os.makedirs(result_dir, exist_ok=True)
 
-        rows = []
-        for (det, dh), fogs in summary.items():
-            row = [det, dh]
-            for fog in FOG_STRENGTHS:
-                metrics = fogs[fog]
-                row += [f"{metrics[0]:.2f}", f"{metrics[1]:.4f}", f"{metrics[2]:.4f}",
-                        f"{metrics[3]:.4f}", f"{metrics[4]:.4f}", f"{metrics[5]:.2f}"]
-            rows.append(row)
+        for tracker in TRACKER_NAMES:
 
-        cols = ["Detector", "Dehaze"]
-        for fog in FOG_STRENGTHS:
-            cols += [f"FPS({fog})", f"mAP({fog})", f"F1({fog})",
-                     f"MOTA({fog})", f"MOTP({fog})", f"IDS({fog})"]
+            csv_path = os.path.join(result_dir, f"{tracker}_summary.csv")
+            if os.path.exists(csv_path):
+                try:
+                    existing_df = pd.read_csv(csv_path)
+                    if "Detector" in existing_df.columns and "Dehaze" in existing_df.columns:
+                        existing_pairs = set(zip(existing_df["Detector"], existing_df["Dehaze"]))
+                    else:
+                        existing_pairs = set()
+                except Exception as e:
+                    print(f"读取 CSV 文件失败，将重建：{csv_path}，错误信息：{e}")
+                    existing_df = pd.DataFrame()
+                    existing_pairs = set()
+            else:
+                existing_df = pd.DataFrame()
+                existing_pairs = set()
 
-        df = pd.DataFrame(rows, columns=cols)
-        out_path = os.path.join(RESULT_DIR, f"{tracker}_summary.csv")
-        df.to_csv(out_path, index=False, encoding='utf-8-sig')
-        print(f"[{tracker}] 结果已保存到 {out_path}")
+            summary = {}
+            for detector, dehaze in DETECTOR_DEHAZE:
+                if (detector, dehaze) in existing_pairs:
+                    print(f"[{tracker}] 跳过已有组合: {detector}-{dehaze}")
+                    continue
 
-    print("全部追踪器推理完成。")
+                ret_list = manager.list()
+                procs = []
+                for gpu_id, folder in enumerate(SOURCE_FOLDERS):
+                    p = Process(target=worker,
+                                args=(gpu_id, folder, tracker,
+                                      detector, dehaze, FOG_STRENGTHS,
+                                      ret_list, threshold))  # 传入阈值
+                    p.start()
+                    procs.append(p)
+                for p in procs:
+                    p.join()
+
+                agg = {}
+                arr = list(ret_list)
+                for fog in FOG_STRENGTHS:
+                    vals = [v.get(fog, (np.nan,) * 6) for v in arr]
+                    mat = np.array(vals, dtype=float)
+                    means = np.nanmean(mat, axis=0)
+                    agg[fog] = means
+                summary[(detector, dehaze)] = agg
+
+            # 构造DataFrame并追加写入
+            rows = []
+            for (det, dh), fogs in summary.items():
+                row = [det, dh]
+                for fog in FOG_STRENGTHS:
+                    metrics = fogs[fog]
+                    row += [f"{metrics[0]:.2f}", f"{metrics[1]:.4f}", f"{metrics[2]:.4f}",
+                            f"{metrics[3]:.4f}", f"{metrics[4]:.4f}", f"{metrics[5]:.2f}"]
+                rows.append(row)
+
+            new_df = pd.DataFrame(rows, columns=["Detector", "Dehaze"] +
+                                  [f"{m}({fog})" for fog in FOG_STRENGTHS for m in
+                                   ["FPS", "mAP", "F1", "MOTA", "MOTP", "IDS"]])
+
+            final_df = pd.concat([existing_df, new_df], ignore_index=True)
+            final_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+            print(f"[{tracker}] 阈值 {threshold} 的结果已保存到 {csv_path}")

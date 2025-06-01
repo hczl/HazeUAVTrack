@@ -33,7 +33,7 @@ class PerceptualNet(nn.Module):
             self.vgg_layers = vgg_model
             self.style_layers = style_layers if None not in style_layers else []
             self.content_layers = content_layers if None not in content_layers else []
-            print(f"VGG MODEL : {net}, sty : {style_layers}, cont : {content_layers}")
+            # print(f"VGG MODEL : {net}, sty : {style_layers}, cont : {content_layers}")
         else:
             print(f"Not computing Perceptual Loss")
 

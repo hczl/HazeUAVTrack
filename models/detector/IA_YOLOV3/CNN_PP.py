@@ -23,7 +23,7 @@ class CNN_PP(nn.Module):
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
 
-        x = x.view(-1, 2048)
+        x = x.reshape(-1, 2048)
         features = F.leaky_relu(self.fc1(x), negative_slope=0.2)
         filter_features = self.fc2(features)
 

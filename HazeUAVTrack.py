@@ -166,6 +166,7 @@ class HazeUAVTrack(nn.Module):
         """
         # 根据配置生成用于文件名的雾强度字符串
         fog_strength_str = f"fog_{int(self.cfg['dataset']['fog_strength'] * 100):03d}"
+        
         self.train_batch_nums = len(train_loader)
         self.val_batch_nums = len(val_loader)
         best_loss = float('inf') # 记录最佳验证损失，用于保存模型

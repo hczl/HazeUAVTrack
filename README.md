@@ -92,7 +92,7 @@ python ./utils/unpack_checkpoints.py```
 ```
 
 **已训练模型下载链接:**
-[百度网盘](https://pan.baidu.com/s/19bs5Cj2nSFmks_niUDUh3A?pwd=vti5)
+[百度网盘](https://pan.baidu.com/s/15Q3fjyKm2mxmy-CIsUJwtQ?pwd=vti5)
 
 
 ## 项目结构

@@ -553,7 +553,7 @@ class AD_YOLOV11(nn.Module):
             iou_thres=iou_thresh,
             max_det=max_det,
             classes=None,
-            agnostic=False,
+            agnostic=True,
         )
 
         detections_xyxy_conf = []
@@ -565,23 +565,20 @@ class AD_YOLOV11(nn.Module):
     def forward_loss(self, images, targets, ignore_list):
 
         processed_batch_dict = process_batch((images, targets, ignore_list))
-
         processed_batch_dict = {k: (v.to(self.device) if isinstance(v, torch.Tensor) else v)
                                 for k, v in processed_batch_dict.items()}
 
         YOLOV11_output = self(processed_batch_dict["img"])
-
         yolov3_loss_tuple = self.loss_fn(processed_batch_dict, YOLOV11_output)
 
         total_loss_for_backprop = yolov3_loss_tuple[0].sum()
-
         detached_component_losses = yolov3_loss_tuple[1]
 
         return {
             'total_loss': total_loss_for_backprop,
-            'box_loss': detached_component_losses[0],  # 标量
-            'cls_loss': detached_component_losses[1],  # 标量
-            'dfl_loss': detached_component_losses[2],  # 标量
+            'box_loss': detached_component_losses[0],
+            'cls_loss': detached_component_losses[1],
+            'dfl_loss': detached_component_losses[2],
         }
 
 
