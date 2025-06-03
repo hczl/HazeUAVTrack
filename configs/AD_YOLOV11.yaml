@@ -6,7 +6,7 @@ method:
   dehaze: NONE
   detector: AD_YOLOV11
   tracker: tracker
-  track_method: bytetrack
+  track_method: ocsort
 conf_threshold: 0.5
 iou_threshold: 0.5
 dataset:

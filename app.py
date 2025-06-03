@@ -159,22 +159,24 @@ def draw_boxes(image_np_original_size, detections):
         # 绿色 (0, 255, 0)，线宽 2
         cv2.rectangle(img_to_draw, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        # 添加文本标注 (置信度)
-        text_x, text_y = x1, y1 - 10 # 文本位置稍高于框的顶部
-        text_y = max(text_y, 15) # 确保文本不会超出图像顶部边界
+        # # 添加文本标注 (置信度)
+        # text_x, text_y = x1, y1 - 10 # 文本位置稍高于框的顶部
+        # text_y = max(text_y, 15) # 确保文本不会超出图像顶部边界
 
-        label = f"{conf:.2f}" # 格式化置信度为字符串
-
-        # 绘制文本 (OpenCV 使用 BGR 颜色格式)
-        # 黄色 (0, 255, 255)，字体缩放 0.5，线宽 2
-        cv2.putText(img_to_draw, label, (text_x, text_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        # label = f"{conf:.2f}" # 格式化置信度为字符串
+        #
+        # # 绘制文本 (OpenCV 使用 BGR 颜色格式)
+        # # 黄色 (0, 255, 255)，字体缩放 0.5，线宽 2
+        # cv2.putText(img_to_draw, label, (text_x, text_y),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
     return img_to_draw
 
 
 # ---- 工作线程函数 ----
-def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var, video_label_size):
+# def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var, video_label_size, gt_folder):
+def process_video_frames(yaml_path, image_folder, conf_var,status_var, video_label_size, gt_folder):
+
     """
     此函数在单独的线程中运行，执行视频处理任务。
     它更新 UI 线程读取的共享变量。
@@ -211,8 +213,8 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         model.eval() # 设置模型为评估模式 (关闭 dropout 等)
 
         # --- 从配置设置模型的初始阈值 ---
-        initial_conf = cfg.get('detector_conf_thresh', 0.85) # 从配置获取初始置信度阈值
-        initial_iou = cfg.get('detector_iou_thresh', 0.5) # 从配置获取初始 IoU 阈值
+        initial_conf = cfg.get('conf_threshold', 0.5) # 从配置获取初始置信度阈值
+        initial_iou = cfg.get('iou_thresh', 0.5) # 从配置获取初始 IoU 阈值
         try:
             # 尝试直接设置模型的属性
             if hasattr(model, 'conf_thresh'):
@@ -224,13 +226,13 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
 
             if hasattr(model, 'iou_thresh'):
                 model.iou_thresh = initial_iou
-                iou_var.set(initial_iou) # 也将 UI 滑动条的值设置为初始配置值
+                # iou_var.set(initial_iou) # 也将 UI 滑动条的值设置为初始配置值
             else:
                  print("Warning: Model object does not have an 'iou_thresh' attribute.")
                  print("IoU slider value will only be displayed.")
 
-            status_var.set(f"Status: Model loaded on {device}. Initial thresholds: Conf={initial_conf:.2f}, IoU={initial_iou:.2f}. Warming up...") # 更新 UI 状态
-
+            # status_var.set(f"Status: Model loaded on {device}. Initial thresholds: Conf={initial_conf:.2f}, IoU={initial_iou:.2f}. Warming up...") # 更新 UI 状态
+            status_var.set(f"Status: Model loaded on {device}. Initial thresholds: Conf={initial_conf:.2f}. Warming up...") # 更新 UI 状态
         except Exception as e:
              print(f"Error setting initial model thresholds: {e}")
              status_var.set(f"Status: Model loaded on {device}. Error setting initial thresholds ({e}). Warming up...")
@@ -279,18 +281,18 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         # --- 从 UI 滑动条获取当前的阈值 ---
         # 在预测之前读取共享的 DoubleVar 对象的值
         current_conf_thresh = conf_var.get()
-        current_iou_thresh = iou_var.get()
+        # current_iou_thresh = iou_var.get()
 
-        # --- 为当前帧设置模型的阈值 ---
-        # 这里更新模型的内部状态，使预测使用最新的阈值
-        try:
-            if model is not None: # 确保模型已成功加载
-                if hasattr(model, 'iou_thresh'):
-                    model.iou_thresh = current_iou_thresh
-        except Exception as e:
-            # 这个警告可能会很频繁，可以选择记录日志或用其他方式处理
-            # print(f"Warning: Could not set model thresholds for frame {i}: {e}")
-            pass # 忽略频繁警告
+        # # --- 为当前帧设置模型的阈值 ---
+        # # 这里更新模型的内部状态，使预测使用最新的阈值
+        # try:
+        #     if model is not None: # 确保模型已成功加载
+        #         if hasattr(model, 'iou_thresh'):
+        #             model.iou_thresh = current_iou_thresh
+        # except Exception as e:
+        #     # 这个警告可能会很频繁，可以选择记录日志或用其他方式处理
+        #     # print(f"Warning: Could not set model thresholds for frame {i}: {e}")
+        #     pass # 忽略频繁警告
 
 
         try:
@@ -341,7 +343,34 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         # 4. 将去雾后的图像调整回原始尺寸，用于绘制和显示
         dehazed_np_original_size = cv2.resize(dehazed_np_resized, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
+        # --- 读取并绘制 Ground Truth 框 ---
+        frame_name = os.path.splitext(os.path.basename(image_path))[0]
+        gt_file = os.path.join(gt_folder, f"{frame_name}.txt")
+        # print(f"[Debug] Looking for GT file: {gt_file}")
 
+        gt_boxes = []
+        if os.path.isfile(gt_file):
+            try:
+                with open(gt_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split(',')
+                        if len(parts) >= 6:
+                            # <bbox_left>,<bbox_top>,<bbox_width>,<bbox_height>
+                            x1 = float(parts[2])
+                            y1 = float(parts[3])
+                            w = float(parts[4])
+                            h = float(parts[5])
+                            x2 = x1 + w
+                            y2 = y1 + h
+                            gt_boxes.append([x1, y1, x2, y2])
+            except Exception as e:
+                print(f"Warning: Failed to read GT label {gt_file}: {e}")
+
+        # 在原图上绘制 GT 框（紫色）
+        for gt_box in gt_boxes:
+            x1, y1, x2, y2 = map(int, gt_box)
+            # print(f"[GT Box] Drawing box: ({x1}, {y1}), ({x2}, {y2})")
+            cv2.rectangle(dehazed_np_original_size, (x1, y1), (x2, y2), (255, 0, 255), 2)  # 紫色框
         # 5. 在原始尺寸的去雾图像上绘制结果。
         # 这里不做置信度过滤，假设模型已经完成了。
         img_to_draw = draw_boxes(dehazed_np_original_size, scaled_predictions)
@@ -354,7 +383,8 @@ def process_video_frames(yaml_path, image_folder, conf_var, iou_var, status_var,
         fps = frame_count / elapsed_time if elapsed_time > 0 else 0 # 计算 FPS
 
         # 构建状态文本字符串
-        status_text = f"FPS: {fps:.2f} | Conf: {current_conf_thresh:.2f} | IoU: {current_iou_thresh:.2f} | Frame: {i+1}/{len(image_files)}"
+        # status_text = f"FPS: {fps:.2f} | Conf: {current_conf_thresh:.2f} | IoU: {current_iou_thresh:.2f} | Frame: {i+1}/{len(image_files)}"
+        status_text = f"FPS: {fps:.2f} | Conf: {current_conf_thresh:.2f} | Frame: {i+1}/{len(image_files)}"
 
         # 7. 准备最终绘制了框的图像 (原始尺寸) 用于 Tkinter 显示
         # 将 BGR 格式的 OpenCV 图像转换为 RGB 格式的 PIL 图像
@@ -403,16 +433,15 @@ class App(tk.Tk):
         self.geometry("800x700") # 设置窗口初始尺寸
 
         # 路径变量，带有默认值
-        # !!! 在这里设置您想要的默认路径 !!!
         self.yaml_path_var = tk.StringVar(value="configs/AD_YOLOV11.yaml") # 示例默认 YAML 路径
+        folder = 'M0704'
         # 示例默认视频帧文件夹路径
-        self.video_folder_var = tk.StringVar(value="data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/M1005")
-        # !!! ---------------------------------- !!!
-
+        self.video_folder_var = tk.StringVar(value=f"data/UAV-M/MiDaS_Deep_UAV-benchmark-M_fog_050/{folder}")
+        self.gt_folder_var = tk.StringVar(value=f"data/UAV-M/frame_labels/test/{folder}")
 
         # 滑动条变量 (DoubleVar 用于存储浮点数)
-        self.conf_var = tk.DoubleVar(value=0.85) # 默认置信度 (将从配置更新)
-        self.iou_var = tk.DoubleVar(value=0.45)  # 默认 IoU (将从配置更新)
+        self.conf_var = tk.DoubleVar(value=0.75) # 默认置信度 (将从配置更新)
+        # self.iou_var = tk.DoubleVar(value=0.5)  # 默认 IoU (将从配置更新)
 
         # 状态文本变量 (StringVar 用于存储字符串)
         self.status_var = tk.StringVar(value="Status: Waiting for input...")
@@ -463,10 +492,24 @@ class App(tk.Tk):
 
         # 开始按钮
         self.start_button = ttk.Button(self.input_frame, text="Start Processing", command=self._start_processing)
-        self.start_button.grid(row=2, column=0, columnspan=3, pady=20)
+        self.start_button.grid(row=3, column=0, columnspan=3, pady=20)
 
         # 配置网格布局，使中间列 (entry) 扩展
         self.input_frame.columnconfigure(1, weight=1)
+
+        # GT 标签路径输入
+        ttk.Label(self.input_frame, text="GT Label Folder:").grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
+
+        self.gt_folder_entry = ttk.Entry(self.input_frame, textvariable=self.gt_folder_var, width=50)
+        self.gt_folder_entry.grid(row=2, column=1, pady=5, padx=5)
+        self.gt_folder_browse_btn = ttk.Button(self.input_frame, text="Browse", command=self._browse_gt_folder)
+        self.gt_folder_browse_btn.grid(row=2, column=2, pady=5, padx=5)
+
+    def _browse_gt_folder(self):
+        foldername = filedialog.askdirectory(title="Select GT Label Folder")
+        if foldername:
+            self.gt_folder_var.set(foldername)
+
 
     def _setup_video_ui(self):
         """设置视频显示和控制界面"""
@@ -496,14 +539,14 @@ class App(tk.Tk):
         self.conf_value_label.grid(row=0, column=2, padx=5)
 
 
-        # IoU 滑动条
-        ttk.Label(sliders_frame, text="IoU Threshold:").grid(row=1, column=0, padx=5)
-        self.iou_slider = ttk.Scale(sliders_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL,
-                                    variable=self.iou_var, length=300)
-        self.iou_slider.grid(row=1, column=1, padx=5)
-        # 显示 IoU 值的标签
-        self.iou_value_label = ttk.Label(sliders_frame, textvariable=self.iou_var, width=5)
-        self.iou_value_label.grid(row=1, column=2, padx=5)
+        # # IoU 滑动条
+        # ttk.Label(sliders_frame, text="IoU Threshold:").grid(row=1, column=0, padx=5)
+        # self.iou_slider = ttk.Scale(sliders_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL,
+        #                             variable=self.iou_var, length=300)
+        # self.iou_slider.grid(row=1, column=1, padx=5)
+        # # 显示 IoU 值的标签
+        # self.iou_value_label = ttk.Label(sliders_frame, textvariable=self.iou_var, width=5)
+        # self.iou_value_label.grid(row=1, column=2, padx=5)
 
         # 停止并重新选择按钮
         self.stop_button = ttk.Button(self.video_frame, text="Stop and Re-select Video", command=self._stop_and_reselect)
@@ -523,7 +566,7 @@ class App(tk.Tk):
         state = "normal" if enabled else "disabled"
         # status_label 和 video_label 没有 state 属性
         self.conf_slider.config(state=state)
-        self.iou_slider.config(state=state)
+        # self.iou_slider.config(state=state)
         # 值标签没有 state 属性
         self.stop_button.config(state=state)
 
@@ -549,7 +592,7 @@ class App(tk.Tk):
         """开始处理按钮的回调函数"""
         yaml_path = self.yaml_path_var.get() # 获取 YAML 路径
         video_folder = self.video_folder_var.get() # 获取视频文件夹路径
-
+        gt_folder = self.gt_folder_var.get()
         # 验证路径是否存在
         if not os.path.isfile(yaml_path):
             messagebox.showerror("Error", f"YAML file not found: {yaml_path}")
@@ -582,10 +625,11 @@ class App(tk.Tk):
         # 重置视频显示标签，显示“模型预热中...”文本
         self.video_label.config(image='', text="Model warming up...")
 
-        # 创建工作线程，并将滑动条变量和状态变量作为参数传递
+
         self.processing_thread = threading.Thread(
             target=process_video_frames,
-            args=(yaml_path, video_folder, self.conf_var, self.iou_var, self.status_var, video_label_size)
+            # args=(yaml_path, video_folder, self.conf_var, self.iou_var, self.status_var, video_label_size, gt_folder)
+            args=(yaml_path, video_folder, self.conf_var, self.status_var, video_label_size, gt_folder)
         )
         # 设置线程为守护线程，允许主线程在工作线程仍在运行时退出
         self.processing_thread.daemon = True
@@ -682,15 +726,15 @@ class App(tk.Tk):
                  model = None
              if torch.cuda.is_available():
                   torch.cuda.empty_cache()
-             # (可选) 处理完成后自动切换回输入界面
-             # self._stop_and_reselect() # 取消注释以实现自动返回
+             self._stop_and_reselect() # 自动返回
 
     def on_closing(self):
+        import os
         """处理窗口关闭事件"""
         print("Closing application...")
         self._stop_processing() # 向工作线程发送停止信号
         self.destroy() # 销毁 Tkinter 窗口
-
+        os._exit(0)
 
 # ---- 主执行块 ----
 if __name__ == "__main__":
