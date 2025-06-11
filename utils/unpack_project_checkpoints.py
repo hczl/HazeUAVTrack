@@ -35,7 +35,9 @@ def unpack_checkpoints(archive_path, target_project_root):
     print(f"目标项目根目录: {target_project_root_abs}")
 
     try:
-        unpack_dir = tempfile.mkdtemp(prefix=unpack_dir_prefix)
+        # unpack_dir = tempfile.mkdtemp(prefix=unpack_dir_prefix)
+        current_dir = os.getcwd()
+        unpack_dir = tempfile.mkdtemp(prefix=unpack_dir_prefix, dir=current_dir)
         print(f"创建临时解压目录: {unpack_dir}")
 
         with tarfile.open(archive_path_abs, 'r:gz') as tar:
